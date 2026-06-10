@@ -13,7 +13,7 @@ from dateutil.parser import parse as dt_parse
 from dateutil.relativedelta import relativedelta
 
 from src.db import ensure_schema, get_connection
-from src.adapters.g2b import G2BAdapter
+from src.adapters.g2b_opnstd import G2BOpnStdAdapter   # g2b.py → g2b_opnstd.py 교체
 
 
 # ------------------------------------------------------------------ #
@@ -71,7 +71,7 @@ def run(month_str: str, db_path: str = "procurement.db") -> dict:
     collected_at = datetime.utcnow().isoformat()
     run_id = str(uuid.uuid4())
 
-    adapter = G2BAdapter()
+    adapter = G2BOpnStdAdapter()
     fetched = inserted = unpriced = 0
 
     conn.execute(
