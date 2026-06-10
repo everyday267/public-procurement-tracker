@@ -1,0 +1,45 @@
+name: monthly-collect
+
+on:
+  schedule:
+    # 매월 1일 07:00 KST = 전날 22:00 UTC
+    - cron: '0 22 28-31 * *'
+  workflow_dispatch:
+    inputs:
+      month:
+        description: '수집 월 (YYYY-MM). 비우면 전월 자동 계산'
+        required: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: 수집 월 계산
+        id: month
+        run: |
+          if [ -n "${{ github.event.inputs.month }}" ]; then
+            echo "value=${{ github.event.inputs.month }}" >> $GITHUB_OUTPUT
+          else
+            echo "value=$(date -u -d '1 month ago' +'%Y-%m')" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 월간 수집 실행
+        run: python -m src.run_monthly --month ${{ steps.month.outputs.value }}
+        env:
+          G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
+
+      - name: DB 업로드 (아티팩트)
+        uses: actions/upload-artifact@v4
+        with:
+          name: procurement-db-${{ steps.month.outputs.value }}
+          path: procurement.db
+          retention-days: 90

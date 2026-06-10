@@ -1,0 +1,21 @@
+name: schema-monitor
+
+on:
+  workflow_run:
+    workflows: ["monthly-collect"]
+    types: [completed]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: 스키마 해시 변경 감지
+        run: python -m src.schema_monitor
+        env:
+          G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

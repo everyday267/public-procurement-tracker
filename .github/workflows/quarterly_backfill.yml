@@ -1,0 +1,26 @@
+name: quarterly-backfill
+
+on:
+  schedule:
+    # 매분기 첫째달(1,4,7,10월) 1일 09:00 KST = 전날 00:00 UTC
+    - cron: '0 0 1 1,4,7,10 *'
+  workflow_dispatch:
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: 직전 3개월 백필
+        run: |
+          for i in 1 2 3; do
+            MONTH=$(date -u -d "$i month ago" +'%Y-%m')
+            echo "Backfill: $MONTH"
+            python -m src.run_monthly --month $MONTH
+          done
+        env:
+          G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
