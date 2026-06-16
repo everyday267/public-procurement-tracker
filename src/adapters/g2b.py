@@ -2,7 +2,7 @@ import hashlib
 import os
 import time
 from datetime import date
-from typing import Iterator
+from typing import Dict, Iterator, List, Optional, Tuple
 
 import requests
 
@@ -23,10 +23,11 @@ class G2BAdapter(BaseProcurementAdapter):
     source = "g2b"
     agency_codes = ["G2B"]
 
-    def __init__(self, api_key: str | None = None, timeout: int = 30, rate_limit: float = 1.0):
+    def __init__(self, api_key=None, timeout=30, rate_limit=1.0):
+        # type: (Optional[str], int, float) -> None
         self.api_key = api_key or os.getenv("G2B_API_KEY")
         self.timeout = timeout
-        self.rate_limit = rate_limit  # 요청 간격(초)
+        self.rate_limit = rate_limit
         if not self.api_key:
             raise ValueError("G2B_API_KEY 환경변수가 없습니다.")
 
@@ -34,11 +35,12 @@ class G2BAdapter(BaseProcurementAdapter):
     # 내부 유틸                                                             #
     # ------------------------------------------------------------------ #
 
-    def _request(self, path: str, params: dict) -> list[dict]:
+    def _request(self, path, params):
+        # type: (str, dict) -> List[Dict]
         """나라장터 API 호출 → items 리스트 반환. 페이지네이션 자동 처리."""
-        url = f"{_BASE_URL}/{path}"
+        url = "{}/{}".format(_BASE_URL, path)
         page_no = 1
-        results: list[dict] = []
+        results = []
 
         while True:
             query = {
@@ -46,8 +48,8 @@ class G2BAdapter(BaseProcurementAdapter):
                 "type": "json",
                 "numOfRows": 999,
                 "pageNo": page_no,
-                **params,
             }
+            query.update(params)
             resp = requests.get(url, params=query, timeout=self.timeout)
             resp.raise_for_status()
             data = resp.json()
@@ -56,10 +58,9 @@ class G2BAdapter(BaseProcurementAdapter):
             total_count = int(body.get("totalCount", 0))
             items = body.get("items", [])
 
-            # items 구조 정규화
             if isinstance(items, dict):
                 items = items.get("item", [])
-            if isinstance(items, dict):   # 단건인 경우
+            if isinstance(items, dict):
                 items = [items]
             items = items or []
 
@@ -72,7 +73,8 @@ class G2BAdapter(BaseProcurementAdapter):
 
         return results
 
-    def _to_int(self, value) -> int | None:
+    def _to_int(self, value):
+        # type: (object) -> Optional[int]
         if value in (None, "", "-"):
             return None
         try:
@@ -80,24 +82,26 @@ class G2BAdapter(BaseProcurementAdapter):
         except (ValueError, TypeError):
             return None
 
-    def _estimated_price_vat_excl(self, raw: dict) -> tuple[int | None, bool]:
+    def _estimated_price_vat_excl(self, raw):
+        # type: (dict) -> Tuple[Optional[int], bool]
         """추정가격(VAT 제외) 반환. 원본이 VAT 포함이면 /1.1 환산."""
         vat_included = False
         for key in ["asignBdgtAmt", "presmptPrce", "estmtPrce", "totPrdprcNum"]:
             amt = self._to_int(raw.get(key))
             if amt:
-                # 원본 표기 확인 (필드명 또는 별도 플래그)
                 if raw.get("vatIncldYn") == "Y":
                     vat_included = True
                     amt = int(amt / 1.1)
                 return amt, vat_included
         return None, vat_included
 
-    def _is_construction(self, raw: dict) -> bool:
+    def _is_construction(self, raw):
+        # type: (dict) -> bool
         value = " ".join(str(raw.get(k, "")) for k in ["bsnsDivNm", "bidNtceNm"])
         return "공사" in value
 
-    def _construction_type(self, raw: dict) -> str | None:
+    def _construction_type(self, raw):
+        # type: (dict) -> Optional[str]
         text = " ".join(str(raw.get(k, "")) for k in ["indstrytyNm", "bidNtceNm"])
         if "전문" in text:
             return "전문"
@@ -109,7 +113,8 @@ class G2BAdapter(BaseProcurementAdapter):
     # 공개 인터페이스                                                        #
     # ------------------------------------------------------------------ #
 
-    def fetch_notices(self, since: date, until: date) -> Iterator[dict]:
+    def fetch_notices(self, since, until):
+        # type: (date, date) -> Iterator[Dict]
         params = {
             "inqryBgnDt": since.strftime("%Y%m%d") + "0000",
             "inqryEndDt": until.strftime("%Y%m%d") + "2359",
@@ -117,7 +122,8 @@ class G2BAdapter(BaseProcurementAdapter):
         for item in self._request(_NOTICE_PATH, params):
             yield item
 
-    def fetch_awards(self, since: date, until: date) -> Iterator[dict]:
+    def fetch_awards(self, since, until):
+        # type: (date, date) -> Iterator[Dict]
         params = {
             "inqryBgnDt": since.strftime("%Y%m%d") + "0000",
             "inqryEndDt": until.strftime("%Y%m%d") + "2359",
@@ -125,12 +131,14 @@ class G2BAdapter(BaseProcurementAdapter):
         for item in self._request(_AWARD_PATH, params):
             yield item
 
-    def fetch_contracts(self, since: date, until: date) -> Iterator[dict]:
+    def fetch_contracts(self, since, until):
+        # type: (date, date) -> Iterator[Dict]
         # 계약 API는 별도 서비스(CntrctInfoService) 사용
         # Phase 1 범위에서 우선 placeholder, 이후 확장
         return iter(())
 
-    def normalize(self, raw: dict) -> dict:
+    def normalize(self, raw):
+        # type: (dict) -> dict
         estimated_price, vat_included = self._estimated_price_vat_excl(raw)
         notice_no  = raw.get("bidNtceNo") or raw.get("ntceNo")
         notice_rev = self._to_int(raw.get("bidNtceOrd")) or 0
@@ -139,7 +147,7 @@ class G2BAdapter(BaseProcurementAdapter):
         ).hexdigest()
 
         return {
-            "notice_id":               f"g2b:{notice_no}:{notice_rev}",
+            "notice_id":               "g2b:{}:{}".format(notice_no, notice_rev),
             "source":                  self.source,
             "notice_no":               notice_no,
             "notice_rev":              notice_rev,
@@ -159,7 +167,8 @@ class G2BAdapter(BaseProcurementAdapter):
             "collected_at":            None,
         }
 
-    def health_check(self) -> bool:
+    def health_check(self):
+        # type: () -> bool
         try:
             items = self._request(
                 _NOTICE_PATH,
