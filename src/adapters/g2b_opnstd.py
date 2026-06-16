@@ -13,7 +13,7 @@ import hashlib
 import os
 import time
 from datetime import date, timedelta
-from typing import Iterator
+from typing import Dict, Iterator, List, Optional, Tuple
 
 import requests
 
@@ -44,7 +44,8 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
     source = "g2b_opnstd"
     agency_codes = ["G2B"]
 
-    def __init__(self, api_key: str | None = None, timeout: int = 30, rate_limit: float = 1.0):
+    def __init__(self, api_key=None, timeout=30, rate_limit=1.0):
+        # type: (Optional[str], int, float) -> None
         self.api_key = api_key or os.getenv("G2B_API_KEY")
         self.timeout = timeout
         self.rate_limit = rate_limit
@@ -55,11 +56,12 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
     # 내부 유틸                                                             #
     # ------------------------------------------------------------------ #
 
-    def _request(self, operation: str, params: dict) -> list[dict]:
+    def _request(self, operation, params):
+        # type: (str, dict) -> List[Dict]
         """단일 날짜 범위로 API 호출 → items 리스트 반환. 페이지네이션 자동 처리."""
-        url = f"{_BASE_URL}/{operation}"
+        url = "{}/{}".format(_BASE_URL, operation)
         page_no = 1
-        results: list[dict] = []
+        results = []
 
         while True:
             query = {
@@ -67,8 +69,8 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
                 "type": "json",
                 "numOfRows": 999,
                 "pageNo": page_no,
-                **params,
             }
+            query.update(params)
             resp = requests.get(url, params=query, timeout=self.timeout)
             resp.raise_for_status()
             data = resp.json()
@@ -79,7 +81,7 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
 
             if isinstance(items, dict):
                 items = items.get("item", [])
-            if isinstance(items, dict):  # 단건
+            if isinstance(items, dict):
                 items = [items]
             items = items or []
 
@@ -92,24 +94,23 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
 
         return results
 
-    def _request_weekly_chunks(
-        self, operation: str, since: date, until: date, extra_params: dict
-    ) -> Iterator[dict]:
+    def _request_weekly_chunks(self, operation, since, until, extra_params):
+        # type: (str, date, date, dict) -> Iterator[Dict]
         """조회범위 1주일 제한 오퍼레이션 대응: 7일 단위로 분할 호출."""
         cursor = since
         while cursor <= until:
             chunk_end = min(cursor + timedelta(days=_WEEKLY_LIMIT_DAYS - 1), until)
             params = {
-                **extra_params,
                 "cntrctCnclsBgnDate": cursor.strftime("%Y%m%d"),
                 "cntrctCnclsEndDate": chunk_end.strftime("%Y%m%d"),
             }
-            yield from self._request(operation, params)
+            params.update(extra_params)
+            for item in self._request(operation, params):
+                yield item
             cursor = chunk_end + timedelta(days=1)
 
-    def _request_weekly_chunks_award(
-        self, since: date, until: date
-    ) -> Iterator[dict]:
+    def _request_weekly_chunks_award(self, since, until):
+        # type: (date, date) -> Iterator[Dict]
         """낙찰정보 전용 분할 호출 (개찰일시 기준, bsnsDivCd=공사 고정)."""
         cursor = since
         while cursor <= until:
@@ -119,10 +120,12 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
                 "opengBgnDt": cursor.strftime("%Y%m%d") + "0000",
                 "opengEndDt": chunk_end.strftime("%Y%m%d") + "2359",
             }
-            yield from self._request(_AWARD_OP, params)
+            for item in self._request(_AWARD_OP, params):
+                yield item
             cursor = chunk_end + timedelta(days=1)
 
-    def _to_int(self, value) -> int | None:
+    def _to_int(self, value):
+        # type: (object) -> Optional[int]
         if value in (None, "", "-"):
             return None
         try:
@@ -130,7 +133,8 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
         except (ValueError, TypeError):
             return None
 
-    def _estimated_price_vat_excl(self, raw: dict) -> tuple[int | None, bool]:
+    def _estimated_price_vat_excl(self, raw):
+        # type: (dict) -> Tuple[Optional[int], bool]
         """추정가격(VAT 제외) 반환. VAT 포함 표기이면 /1.1 환산."""
         vat_included = False
         for key in ["presmptPrce", "asignBdgtAmt", "bssAmt"]:
@@ -142,11 +146,13 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
                 return amt, vat_included
         return None, vat_included
 
-    def _is_construction(self, raw: dict) -> bool:
+    def _is_construction(self, raw):
+        # type: (dict) -> bool
         value = " ".join(str(raw.get(k, "")) for k in ["bsnsDivNm", "bidNtceNm"])
         return "공사" in value
 
-    def _construction_type(self, raw: dict) -> str | None:
+    def _construction_type(self, raw):
+        # type: (dict) -> Optional[str]
         text = " ".join(str(raw.get(k, "")) for k in ["indstrytyLmtYn", "bidprcPsblIndstrytyNm", "bidNtceNm"])
         if "전문" in text:
             return "전문"
@@ -158,29 +164,34 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
     # 공개 인터페이스                                                        #
     # ------------------------------------------------------------------ #
 
-    def fetch_notices(self, since: date, until: date) -> Iterator[dict]:
+    def fetch_notices(self, since, until):
+        # type: (date, date) -> Iterator[Dict]
         """입찰공고 수집 (입찰공고일시 기준, 1개월 제한 → 월 단위 호출 가능)."""
         params = {
             "bidNtceBgnDt": since.strftime("%Y%m%d") + "0000",
             "bidNtceEndDt": until.strftime("%Y%m%d") + "2359",
         }
-        yield from self._request(_NOTICE_OP, params)
+        for item in self._request(_NOTICE_OP, params):
+            yield item
 
-    def fetch_awards(self, since: date, until: date) -> Iterator[dict]:
+    def fetch_awards(self, since, until):
+        # type: (date, date) -> Iterator[Dict]
         """낙찰정보 수집 (개찰일시 기준, 1주일 단위 자동 분할)."""
-        yield from self._request_weekly_chunks_award(since, until)
+        for item in self._request_weekly_chunks_award(since, until):
+            yield item
 
-    def fetch_contracts(self, since: date, until: date) -> Iterator[dict]:
+    def fetch_contracts(self, since, until):
+        # type: (date, date) -> Iterator[Dict]
         """계약정보 수집 (계약체결일자 기준, 1주일 단위 자동 분할).
 
         g2b.py에서 placeholder였던 부분이 실제 동작하는 구현으로 완성됨.
         insttDivCd/insttCd 미지정 시 전체 기관 조회.
         """
-        yield from self._request_weekly_chunks(
-            _CONTRACT_OP, since, until, extra_params={}
-        )
+        for item in self._request_weekly_chunks(_CONTRACT_OP, since, until, {}):
+            yield item
 
-    def normalize(self, raw: dict) -> dict:
+    def normalize(self, raw):
+        # type: (dict) -> dict
         estimated_price, vat_included = self._estimated_price_vat_excl(raw)
         notice_no  = raw.get("bidNtceNo") or raw.get("ntceNo")
         notice_rev = self._to_int(raw.get("bidNtceOrd")) or 0
@@ -189,7 +200,7 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
         ).hexdigest()
 
         return {
-            "notice_id":               f"g2b_opnstd:{notice_no}:{notice_rev}",
+            "notice_id":               "g2b_opnstd:{}:{}".format(notice_no, notice_rev),
             "source":                  self.source,
             "notice_no":               notice_no,
             "notice_rev":              notice_rev,
@@ -207,7 +218,6 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
             "raw_payload":             raw,
             "source_hash":             payload_hash,
             "collected_at":            None,
-            # 낙찰/계약 전용 추가 필드 (notices 테이블에 없으면 raw_payload에서 참조)
             "_award_corp":             raw.get("fnlSucsfCorpNm"),
             "_award_corp_bizrno":      raw.get("fnlSucsfCorpBizrno"),
             "_award_amt":              self._to_int(raw.get("fnlSucsfAmt")),
@@ -217,7 +227,8 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
             "_demand_inst":            raw.get("dmndInsttNm"),
         }
 
-    def health_check(self) -> bool:
+    def health_check(self):
+        # type: () -> bool
         try:
             items = self._request(
                 _NOTICE_OP,
