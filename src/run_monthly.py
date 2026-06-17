@@ -1,123 +1,140 @@
-"""월간 배치 실행기.
+"""
+run_monthly.py — LH 월간 수집 + bidNum 조인 + CSV 저장
 
 사용법:
     python -m src.run_monthly --month 2026-05
-    python -m src.run_monthly --month 2026-05 --db-path /path/to/procurement.db
+    python -m src.run_monthly --month 2026-05 --db procurement.db
 """
-import argparse
-import json
+import os
 import uuid
-from datetime import datetime
+import json
+import logging
+import argparse
+from datetime import date, datetime, timedelta
+from pathlib import Path
 
-from dateutil.parser import parse as dt_parse
 from dateutil.relativedelta import relativedelta
+import pandas as pd
 
-from src.db import ensure_schema, get_connection
-from src.adapters.g2b_opnstd import G2BOpnStdAdapter   # g2b.py → g2b_opnstd.py 교체
+from src.adapters.lh import LHAdapter, CONSTRUCTION_MIN_PRICE
+from src.db import connect, init_db, upsert_notices, insert_awards, insert_contracts
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("run_monthly")
 
 
-# ------------------------------------------------------------------ #
-# 유틸                                                                 #
-# ------------------------------------------------------------------ #
+# ── 기간 계산 ──────────────────────────────────────────────────────────────
 
-def month_window(month_str: str):
-    """'2026-05' → (2026-05-01, 2026-05-31)"""
-    start = dt_parse(month_str + "-01").date()
-    end = (start + relativedelta(months=1)) - relativedelta(days=1)
+def month_bounds(ym: str) -> tuple[date, date]:
+    y, m = map(int, ym.split("-"))
+    start = date(y, m, 1)
+    end = (start + relativedelta(months=1)) - timedelta(days=1)
     return start, end
 
 
-# ------------------------------------------------------------------ #
-# DB 적재                                                              #
-# ------------------------------------------------------------------ #
+# ── 조인 ──────────────────────────────────────────────────────────────────
 
-_NOTICE_INSERT = """
-INSERT OR REPLACE INTO notices (
-    notice_id, source, notice_no, notice_rev, agency_code, title, work_type,
-    construction_type, is_long_term_continuing, bid_method, estimated_price,
-    vat_included, posted_at, bid_open_at, status, raw_payload, source_hash, collected_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-"""
+def join_all(notices: list[dict], awards: list[dict], contracts: list[dict]) -> pd.DataFrame:
+    ndf = pd.DataFrame(notices)[[
+        "notice_no", "title", "construction_type", "bid_method",
+        "is_long_term_continuing", "estimated_price", "posted_at", "status",
+        "zone_hq", "license_conditions", "vendor_restrictions",
+    ]].drop_duplicates("notice_no")
 
-_UNPRICED_INSERT = """
-INSERT OR REPLACE INTO notices_unpriced (
-    notice_id, source, notice_no, notice_rev, agency_code, title, work_type,
-    construction_type, is_long_term_continuing, bid_method, estimated_price,
-    vat_included, posted_at, bid_open_at, status, raw_payload, source_hash, collected_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-"""
+    adf = pd.DataFrame(awards)
+    if not adf.empty and "winner_status" in adf.columns:
+        winners = adf[adf["winner_status"].str.contains("낙찰", na=False)]
+        adf = winners.drop_duplicates("notice_no") if not winners.empty else adf.drop_duplicates("notice_no")
+    elif not adf.empty:
+        adf = adf.drop_duplicates("notice_no")
+    if not adf.empty:
+        adf = adf[["notice_no", "bidder_name", "bidder_biz_no",
+                   "award_price", "award_rate", "expect_price"]].rename(columns={
+            "bidder_name": "winner_name", "bidder_biz_no": "winner_biz_no",
+        })
+    else:
+        adf = pd.DataFrame()
+
+    cdf = pd.DataFrame(contracts)
+    if not cdf.empty:
+        cdf = cdf.drop_duplicates("notice_no")[[
+            "notice_no", "contract_name", "contract_price",
+            "contracted_at", "contractor_name", "start_date", "end_date",
+        ]]
+
+    merged = ndf
+    if not adf.empty:
+        merged = merged.merge(adf, on="notice_no", how="left")
+    if not cdf.empty:
+        merged = merged.merge(cdf, on="notice_no", how="left")
+    return merged
 
 
-def _notice_values(n: dict, collected_at: str) -> tuple:
-    return (
-        n["notice_id"], n["source"], n["notice_no"], n["notice_rev"],
-        n["agency_code"], n["title"], n["work_type"],
-        n["construction_type"], int(bool(n["is_long_term_continuing"])),
-        n["bid_method"], n["estimated_price"],
-        int(bool(n["vat_included"])), n["posted_at"], n["bid_open_at"],
-        n["status"], json.dumps(n["raw_payload"], ensure_ascii=False),
-        n["source_hash"], collected_at,
-    )
+# ── 메인 ──────────────────────────────────────────────────────────────────
 
+def run(month: str, db_path: str = "procurement.db", output_dir: str = "output"):
+    start, end = month_bounds(month)
+    run_id = str(uuid.uuid4())[:8]
+    started_at = datetime.now().isoformat()
+    logger.info("=== LH 수집 시작 | %s ~ %s | run_id=%s ===", start, end, run_id)
 
-# ------------------------------------------------------------------ #
-# 메인                                                                 #
-# ------------------------------------------------------------------ #
+    lh = LHAdapter()
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    conn = connect(db_path)
+    init_db(conn)
 
-def run(month_str: str, db_path: str = "procurement.db") -> dict:
-    since, until = month_window(month_str)
-    conn = get_connection(db_path)
-    ensure_schema(conn)
-    collected_at = datetime.utcnow().isoformat()
-    run_id = str(uuid.uuid4())
+    # 공고 수집
+    logger.info("[1/3] 입찰공고 수집 중...")
+    raw_notices = list(lh.fetch_notices(start, end))
+    notices = [lh.normalize_notice(r) for r in raw_notices]
+    notices_const = [n for n in notices if n.get("work_type") == "공사"]
+    notices_ok = [n for n in notices_const if lh.passes_filter(n)]
+    notices_unpriced = [n for n in notices_const if n.get("estimated_price") is None]
+    logger.info("  공고 전체=%d 공사=%d 100억이상=%d 미공개=%d",
+                len(notices), len(notices_const), len(notices_ok), len(notices_unpriced))
+    upsert_notices(conn, notices_ok)
 
-    adapter = G2BOpnStdAdapter()
-    fetched = inserted = unpriced = 0
+    # 개찰 수집
+    logger.info("[2/3] 개찰결과 수집 중...")
+    raw_awards = list(lh.fetch_awards(start, end))
+    awards = [lh.normalize_award(r) for r in raw_awards]
+    insert_awards(conn, awards)
+    logger.info("  개찰 %d건 적재", len(awards))
 
-    conn.execute(
-        "INSERT INTO source_runs (run_id, source, started_at, status) VALUES (?, ?, ?, ?)",
-        (run_id, adapter.source, collected_at, "running"),
-    )
+    # 계약 수집
+    logger.info("[3/3] 계약현황 수집 중...")
+    raw_contracts = list(lh.fetch_contracts(start, end))
+    contracts = [lh.normalize_contract(r) for r in raw_contracts]
+    insert_contracts(conn, contracts)
+    logger.info("  계약 %d건 적재", len(contracts))
+
+    # 조인 CSV
+    joined = join_all(notices_ok, awards, contracts)
+    csv_path = Path(output_dir) / f"lh_joined_{month.replace('-', '')}.csv"
+    joined.to_csv(csv_path, index=False, encoding="utf-8-sig")
+    logger.info("CSV 저장: %s (%d행)", csv_path, len(joined))
+
+    # source_runs 기록
+    ended_at = datetime.now().isoformat()
+    conn.execute("""
+        INSERT OR REPLACE INTO source_runs
+          (run_id, source, started_at, ended_at, status, fetched_count, filtered_count)
+        VALUES (?,?,?,?,?,?,?)
+    """, (run_id, "lh", started_at, ended_at, "success",
+          len(raw_notices) + len(raw_awards) + len(raw_contracts), len(notices_ok)))
     conn.commit()
-
-    try:
-        for raw in adapter.fetch_notices(since, until):
-            fetched += 1
-            normalized = adapter.normalize(raw)
-            normalized["collected_at"] = collected_at
-
-            if adapter.passes_filter(normalized):
-                conn.execute(_NOTICE_INSERT, _notice_values(normalized, collected_at))
-                inserted += 1
-            elif adapter.is_unpriced(normalized):
-                conn.execute(_UNPRICED_INSERT, _notice_values(normalized, collected_at))
-                unpriced += 1
-
-        conn.execute(
-            "UPDATE source_runs SET ended_at=?, status=?, fetched_count=?, filtered_count=? WHERE run_id=?",
-            (datetime.utcnow().isoformat(), "success", fetched, inserted, run_id),
-        )
-    except Exception as exc:
-        conn.execute(
-            "UPDATE source_runs SET ended_at=?, status=?, error_message=? WHERE run_id=?",
-            (datetime.utcnow().isoformat(), "error", str(exc), run_id),
-        )
-        raise
-    finally:
-        conn.commit()
-        conn.close()
-
-    return {"month": month_str, "fetched": fetched, "inserted": inserted, "unpriced": unpriced}
-
-
-def main():
-    parser = argparse.ArgumentParser(description="나라장터 등 공공발주 월간 수집")
-    parser.add_argument("--month", required=True, help="수집 월 (예: 2026-05)")
-    parser.add_argument("--db-path", default="procurement.db")
-    args = parser.parse_args()
-    result = run(args.month, args.db_path)
-    print(result)
+    conn.close()
+    logger.info("=== 완료 ===")
+    return str(csv_path)
 
 
 if __name__ == "__main__":
-    main()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--month", required=True, help="YYYY-MM (예: 2026-05)")
+    ap.add_argument("--db", default="procurement.db")
+    ap.add_argument("--output", default="output")
+    args = ap.parse_args()
+    run(args.month, args.db, args.output)
