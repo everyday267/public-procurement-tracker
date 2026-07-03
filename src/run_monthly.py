@@ -154,7 +154,7 @@ def join_all(source: str, notices: list[dict], awards: list[dict], contracts: li
 # ── 메인 ──────────────────────────────────────────────────────────────────
 
 def _process_source(conn, source, adapter, raw_notices, raw_awards, raw_contracts,
-                    month, output_dir, all_joined) -> bool:
+                    label, output_dir, all_joined) -> bool:
     """이미 fetch된 원본을 정규화·필터링·적재하고 조인 CSV를 만든다. 성공 여부 반환."""
     run_id = str(uuid.uuid4())[:8]
     started_at = datetime.now().isoformat()
@@ -186,7 +186,7 @@ def _process_source(conn, source, adapter, raw_notices, raw_awards, raw_contract
                     source, len(contracts), len(raw_contracts))
 
         joined = join_all(source, notices_ok, awards, contracts)
-        csv_path = Path(output_dir) / f"{source}_joined_{month.replace('-', '')}.csv"
+        csv_path = Path(output_dir) / f"{source}_joined_{label}.csv"
         joined.to_csv(csv_path, index=False, encoding="utf-8-sig")
         logger.info("  [%s] CSV 저장: %s (%d행)", source, csv_path, len(joined))
         all_joined.append(joined)
@@ -222,14 +222,28 @@ def _record_fetch_error(conn, source, started_at, err) -> None:
     conn.commit()
 
 
-def run(month: str, db_path: str = "procurement.db", output_dir: str = "output",
-        sources: Optional[List[str]] = None) -> str:
+def run(month: Optional[str] = None, db_path: str = "procurement.db", output_dir: str = "output",
+        sources: Optional[List[str]] = None,
+        since: Optional[str] = None, until: Optional[str] = None) -> str:
     active = sources or list(SOURCES.keys())
     unknown = [s for s in active if s not in SOURCES]
     if unknown:
         raise ValueError(f"알 수 없는 source: {unknown} (사용가능: {list(SOURCES.keys())})")
 
-    start, end = month_bounds(month)
+    # 기간: --since/--until(임의 구간, 짧은 스모크 테스트용)이 우선, 없으면 --month.
+    if since and until:
+        start = datetime.strptime(since, "%Y-%m-%d").date()
+        end = datetime.strptime(until, "%Y-%m-%d").date()
+        if start > end:
+            raise ValueError(f"since({since}) > until({until})")
+        label = f"{start:%Y%m%d}_{end:%Y%m%d}"
+    elif month:
+        start, end = month_bounds(month)
+        label = month.replace("-", "")
+    else:
+        raise ValueError("--month 또는 --since/--until 중 하나는 필요합니다.")
+    logger.info("수집 기간: %s ~ %s (label=%s)", start, end, label)
+
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     conn = get_connection(db_path)
     ensure_schema(conn)
@@ -244,7 +258,7 @@ def run(month: str, db_path: str = "procurement.db", output_dir: str = "output",
         try:
             adapter = SOURCES["lh"]()
             rn, ra, rc = _fetch_all(adapter, start, end)
-            if _process_source(conn, "lh", adapter, rn, ra, rc, month, output_dir, all_joined):
+            if _process_source(conn, "lh", adapter, rn, ra, rc, label, output_dir, all_joined):
                 any_success = True
         except Exception as e:
             logger.exception("[lh] 수집 실패")
@@ -288,17 +302,17 @@ def run(month: str, db_path: str = "procurement.db", output_dir: str = "output",
                     fc = [r for r in raw_c if kr._is_kr_rail(r)]
                     logger.info("=== [kr_rail] 국가철도공단 필터 | 공고=%d 낙찰=%d 계약=%d ===",
                                 len(fn), len(fa), len(fc))
-                    if _process_source(conn, "kr_rail", kr, fn, fa, fc, month, output_dir, all_joined):
+                    if _process_source(conn, "kr_rail", kr, fn, fa, fc, label, output_dir, all_joined):
                         any_success = True
                 else:
                     logger.info("=== [g2b_opnstd] 전국 처리 ===")
                     if _process_source(conn, "g2b_opnstd", g2b, raw_n, raw_a, raw_c,
-                                       month, output_dir, all_joined):
+                                       label, output_dir, all_joined):
                         any_success = True
 
     if all_joined:
         combined = pd.concat(all_joined, ignore_index=True)
-        combined_path = Path(output_dir) / f"all_joined_{month.replace('-', '')}.csv"
+        combined_path = Path(output_dir) / f"all_joined_{label}.csv"
         combined.to_csv(combined_path, index=False, encoding="utf-8-sig")
         total_price = int(combined["estimated_price"].fillna(0).sum())
         logger.info("전체 통합 CSV 저장: %s (%d행, 추정가격 합계=%s원)",
@@ -308,15 +322,17 @@ def run(month: str, db_path: str = "procurement.db", output_dir: str = "output",
     if not any_success:
         raise RuntimeError("모든 소스 수집 실패 — 위 로그의 개별 에러 확인 필요")
     logger.info("=== 완료 ===")
-    return str(Path(output_dir) / f"all_joined_{month.replace('-', '')}.csv")
+    return str(Path(output_dir) / f"all_joined_{label}.csv")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--month", required=True, help="YYYY-MM (예: 2026-05)")
+    ap.add_argument("--month", default=None, help="YYYY-MM (예: 2026-05). --since/--until 없을 때 사용")
+    ap.add_argument("--since", default=None, help="YYYY-MM-DD 임의 시작일 (짧은 스모크 테스트용)")
+    ap.add_argument("--until", default=None, help="YYYY-MM-DD 임의 종료일")
     ap.add_argument("--db", default="procurement.db")
     ap.add_argument("--output", default="output")
     ap.add_argument("--sources", default=None, help="쉼표구분 source 목록 (예: lh,kr_rail). 미지정시 전체")
     args = ap.parse_args()
     source_list = args.sources.split(",") if args.sources else None
-    run(args.month, args.db, args.output, source_list)
+    run(args.month, args.db, args.output, source_list, since=args.since, until=args.until)

@@ -10,6 +10,15 @@ on:
       month:
         description: '수집 월 (YYYY-MM). 비우면 전월 자동 계산'
         required: false
+      since:
+        description: '임의 시작일 (YYYY-MM-DD). 짧은 스모크 테스트용. until과 함께 지정하면 month보다 우선'
+        required: false
+      until:
+        description: '임의 종료일 (YYYY-MM-DD)'
+        required: false
+      sources:
+        description: '수집 소스 (쉼표구분, 예: g2b_opnstd 또는 lh,kr_rail). 비우면 전체'
+        required: false
 
 jobs:
   collect:
@@ -35,19 +44,35 @@ jobs:
             echo "should_run=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: 수집 월 계산
-        id: month
+      - name: 수집 인자 계산
+        id: args
         if: steps.guard.outputs.should_run == 'true'
         run: |
-          if [ -n "${{ github.event.inputs.month }}" ]; then
-            echo "value=${{ github.event.inputs.month }}" >> $GITHUB_OUTPUT
+          SINCE="${{ github.event.inputs.since }}"
+          UNTIL="${{ github.event.inputs.until }}"
+          SOURCES="${{ github.event.inputs.sources }}"
+          if [ -n "$SINCE" ] && [ -n "$UNTIL" ]; then
+            # 임의 구간 (짧은 테스트). 라벨은 파일명·아티팩트명에 사용.
+            echo "cli=--since $SINCE --until $UNTIL" >> $GITHUB_OUTPUT
+            echo "label=${SINCE//-/}_${UNTIL//-/}" >> $GITHUB_OUTPUT
           else
-            echo "value=$(date -u -d '1 month ago' +'%Y-%m')" >> $GITHUB_OUTPUT
+            if [ -n "${{ github.event.inputs.month }}" ]; then
+              MONTH="${{ github.event.inputs.month }}"
+            else
+              MONTH="$(date -u -d '1 month ago' +'%Y-%m')"
+            fi
+            echo "cli=--month $MONTH" >> $GITHUB_OUTPUT
+            echo "label=${MONTH//-/}" >> $GITHUB_OUTPUT
+          fi
+          if [ -n "$SOURCES" ]; then
+            echo "sources=--sources $SOURCES" >> $GITHUB_OUTPUT
+          else
+            echo "sources=" >> $GITHUB_OUTPUT
           fi
 
-      - name: 월간 수집 실행
+      - name: 수집 실행
         if: steps.guard.outputs.should_run == 'true'
-        run: python -m src.run_monthly --month ${{ steps.month.outputs.value }}
+        run: python -m src.run_monthly ${{ steps.args.outputs.cli }} ${{ steps.args.outputs.sources }}
         env:
           G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
           LH_API_KEY: ${{ secrets.LH_API_KEY }}
@@ -56,6 +81,6 @@ jobs:
         if: steps.guard.outputs.should_run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: procurement-db-${{ steps.month.outputs.value }}
+          name: procurement-db-${{ steps.args.outputs.label }}
           path: procurement.db
           retention-days: 90

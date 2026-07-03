@@ -37,7 +37,18 @@ python -m src.run_monthly --month 2026-05
 
 # 특정 소스만 실행
 python -m src.run_monthly --month 2026-05 --sources lh,kr_rail
+
+# 짧은 임의 기간으로 빠르게 스모크 테스트 (전국 계약 수집이 무거우므로
+# 먼저 좁은 기간으로 정상 동작을 확인한 뒤 기간을 넓히는 것을 권장)
+python -m src.run_monthly --since 2026-06-01 --until 2026-06-07 --sources g2b_opnstd
 ```
+
+> **성능 참고:** 나라장터 개방표준(OpnStd) 계약 API는 서버측 기관/공사 필터를
+> 제공하지 않아 대상 기간의 전국 계약을 순회해야 합니다. `g2b_opnstd`/`kr_rail`은
+> 필터된 공고(공사 100억↑)의 `bidNtceNo`로 좁혀 조회를 시도하되, 서버가 그 필터를
+> 지원하지 않으면 전국 순회로 폴백합니다. 따라서 월 단위 실행은 수십 분이 걸릴 수
+> 있습니다(월 1회 배치라 GitHub Actions 6시간 한도 내에서 문제없음). 동작 검증은
+> 위처럼 `--since/--until`로 짧은 기간부터 하는 것을 권장합니다.
 
 `run_monthly`는 지정된 모든 소스를 순회하며 하나가 실패해도 나머지는 계속 진행합니다
 (소스별 성공/실패는 `source_runs` 테이블에 기록). 소스별 CSV(`output/{source}_joined_YYYYMM.csv`)와
