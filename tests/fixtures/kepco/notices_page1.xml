@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ⚠️ 합성 샘플(placeholder): 실서비스 응답 샘플 수령 시 이 파일을 교체하고
+     src/adapters/kepco.py 의 _FIELD_CANDIDATES 를 확정한다. -->
+<response>
+  <header>
+    <resultCode>00</resultCode>
+    <resultMsg>NORMAL SERVICE.</resultMsg>
+  </header>
+  <body>
+    <items>
+      <item>
+        <bidNo>K2026-0601-001</bidNo>
+        <bidDegree>1</bidDegree>
+        <bidNm>345kV 송전선로 건설공사 (장기계속 1차)</bidNm>
+        <bidKindNm>공사</bidKindNm>
+        <cntrctMthdNm>장기계속계약</cntrctMthdNm>
+        <presmptPrc>25000000000</presmptPrc>
+        <vatYn>N</vatYn>
+        <notiDate>2026-06-01</notiDate>
+        <openDate>2026-06-15</openDate>
+        <bidStatusNm>공고중</bidStatusNm>
+      </item>
+      <item>
+        <bidNo>K2026-0602-002</bidNo>
+        <bidDegree>1</bidDegree>
+        <bidNm>변전소 신설 종합공사</bidNm>
+        <bidKindNm>공사</bidKindNm>
+        <cntrctMthdNm>일반경쟁</cntrctMthdNm>
+        <presmptPrc>11000000000</presmptPrc>
+        <vatYn>Y</vatYn>
+        <notiDate>2026-06-02</notiDate>
+        <openDate>2026-06-16</openDate>
+        <bidStatusNm>공고중</bidStatusNm>
+      </item>
+    </items>
+    <numOfRows>2</numOfRows>
+    <pageNo>1</pageNo>
+    <totalCount>3</totalCount>
+  </body>
+</response>

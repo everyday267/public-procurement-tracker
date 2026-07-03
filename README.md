@@ -1,6 +1,6 @@
 # Public Procurement Tracker
 
-14개 발주처의 공사(종합·전문) 입찰공고·낙찰·계약 정보를 월 1회 자동 수집하는 시스템입니다.
+16개 발주처의 공사(종합·전문) 입찰공고·낙찰·계약 정보를 월 1회 자동 수집하는 시스템입니다 (PRD v1.4 기준).
 
 ## 수집 기준
 - work_type: **공사만** (종합·전문)
@@ -11,8 +11,8 @@
 ## Phase
 - Phase 0: 인프라 — 완료
 - Phase 1: 나라장터 + LH + 한전(KEPCO) + 국가철도공단 — **진행 중** (아래 "현재 진행 현황" 참고)
-- Phase 2: 한수원·도공·수공·동서·중부발전
-- Phase 3: SH·부산항만·인천공항·가스·환경
+- Phase 2: 도공(EX)·수공(KWATER)·가스(KOGAS)·한수원(KHNP) + 발전 5사(EWP·KOMIPO·KOSPO·KOEN·KOWEPO)
+- Phase 3: SH·GH(경기주택도시공사)·환경(KECO, G2B 커버리지 검증만)
 - Phase 4: 발주계획(plans)
 
 ## 현재 진행 현황 (Phase 1)
@@ -22,10 +22,13 @@
 | 나라장터 (`g2b_opnstd.py`) | ✅ | ✅ | 🔲 |
 | LH (`lh.py`) | ✅ | ✅ | 🔲 |
 | 국가철도공단 (`kr_rail.py`, 나라장터 경유) | ✅ | ✅ | 🔲 |
-| 한전 KEPCO (`kepco.py`) | 🔲 미착수 | — | — |
+| 한전 KEPCO (`kepco.py`, 공공데이터포털 OpenAPI) | ✅ | ✅ | 🔲 |
 
-> KEPCO는 srm.kepco.net XHR 기반 자체 조달망이라 로그인/세션 처리 방식 확인이 먼저 필요합니다.
-> 어댑터 코드가 없으므로 `run_monthly.py`의 `SOURCES`에도 아직 포함되어 있지 않습니다.
+> KEPCO는 공공데이터포털 "한국전력공사_전자입찰계약정보" OpenAPI를 1차 경로로,
+> srm.kepco.net XHR 스크래핑을 폴백으로 수집합니다 (실행계획 §2.1).
+> 실서비스 응답 필드명·낙찰/계약 오퍼레이션은 기술문서·샘플 확보 후 확정이 필요하며
+> (`src/adapters/kepco.py`의 `_FIELD_CANDIDATES` 참고), `KEPCO_API_KEY` 미설정 시
+> 해당 소스는 경고 후 skip 됩니다.
 
 ## 실행
 
@@ -33,6 +36,7 @@
 pip install -r requirements.txt
 export G2B_API_KEY=...
 export LH_API_KEY=...
+export KEPCO_API_KEY=...
 python -m src.run_monthly --month 2026-05
 
 # 특정 소스만 실행
@@ -60,14 +64,15 @@ python -m src.run_monthly --since 2026-06-01 --until 2026-06-07 --sources g2b_op
 |---|---|
 | `G2B_API_KEY` | 나라장터 + 국가철도공단(나라장터 경유) |
 | `LH_API_KEY` | LH e-Bid 자체 OpenAPI |
+| `KEPCO_API_KEY` | 한전 전자입찰계약정보 OpenAPI (공공데이터포털 발급) |
 
-두 시크릿 모두 Settings → Secrets and variables → Actions에 등록되어 있어야
+시크릿이 Settings → Secrets and variables → Actions에 등록되어 있어야
 `monthly-collect` / `quarterly-backfill` 워크플로우가 정상 동작합니다.
 
 ## 디렉토리
 ```
 src/
-  adapters/        사이트별 어댑터 (base, lh, g2b_opnstd, kr_rail)
+  adapters/        사이트별 어댑터 (base, lh, g2b_opnstd, kr_rail, kepco)
   db.py            SQLite 스키마/연결
   normalizer.py
   long_term_detector.py

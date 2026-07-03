@@ -76,6 +76,7 @@ jobs:
         env:
           G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
           LH_API_KEY: ${{ secrets.LH_API_KEY }}
+          KEPCO_API_KEY: ${{ secrets.KEPCO_API_KEY }}
 
       - name: DB 업로드 (아티팩트)
         if: steps.guard.outputs.should_run == 'true'
