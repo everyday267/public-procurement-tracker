@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- LH e-Bid OpenTenderopenList 필드명 기반 합성 샘플 -->
+<response>
+  <header>
+    <resultCode>00</resultCode>
+    <resultMsg>NORMAL SERVICE.</resultMsg>
+  </header>
+  <body>
+    <items>
+      <item>
+        <bidNum>2026-LH-0001</bidNum>
+        <tndrVndrNm>한국건설(주)</tndrVndrNm>
+        <taxregno>123-45-67890</taxregno>
+        <decTndrAmt>11500000000</decTndrAmt>
+        <invtgtRate>95.83</invtgtRate>
+        <openDtm>2026-06-20 14:00:00</openDtm>
+        <vndrSccfBidStatusNm>낙찰</vndrSccfBidStatusNm>
+        <expectPrc>12000000000</expectPrc>
+        <designPrc>12100000000</designPrc>
+        <fdmtlAmt>11900000000</fdmtlAmt>
+        <decLotNum1>3</decLotNum1>
+        <decLotNum2>7</decLotNum2>
+      </item>
+    </items>
+    <numOfRows>1</numOfRows>
+    <pageNo>1</pageNo>
+    <totalCount>1</totalCount>
+  </body>
+</response>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- LH e-Bid OpenBidInfoList 필드명 기반 합성 샘플 (실서비스 검증 시 실제 응답으로 교체 권장) -->
+<response>
+  <header>
+    <resultCode>00</resultCode>
+    <resultMsg>NORMAL SERVICE.</resultMsg>
+  </header>
+  <body>
+    <items>
+      <item>
+        <bidNum>2026-LH-0001</bidNum>
+        <bidnmKor>○○지구 아파트 건설공사 1공구(장기계속)</bidnmKor>
+        <presmtPrc>12000000000</presmtPrc>
+        <addtTax>1200000000</addtTax>
+        <sunjungNm>종합심사낙찰제</sunjungNm>
+        <tndrCtrctMedCd>전자입찰</tndrCtrctMedCd>
+        <openDtm>2026-06-20 14:00:00</openDtm>
+        <tndrbidRegDt>20260601</tndrbidRegDt>
+        <bidProgrsStatus>공고중</bidProgrsStatus>
+        <zoneHqCd>경기남부</zoneHqCd>
+        <req1LicGbNm>종합</req1LicGbNm>
+        <req1BsncatGrpNm>건축공사업</req1BsncatGrpNm>
+        <req1LicctNm>단독</req1LicctNm>
+        <req1Reqlic1Nm>건축공사업</req1Reqlic1Nm>
+        <vndrrstrctNm1>지역제한(경기)</vndrrstrctNm1>
+      </item>
+      <item>
+        <bidNum>2026-LH-0002</bidNum>
+        <bidnmKor>△△단지 조경공사</bidnmKor>
+        <presmtPrc></presmtPrc>
+        <addtTax></addtTax>
+        <sunjungNm>적격심사</sunjungNm>
+        <openDtm>2026-06-25 11:00:00</openDtm>
+        <tndrbidRegDt>20260603</tndrbidRegDt>
+        <bidProgrsStatus>공고중</bidProgrsStatus>
+        <req1LicGbNm>전문</req1LicGbNm>
+        <req1BsncatGrpNm>조경식재공사업</req1BsncatGrpNm>
+      </item>
+    </items>
+    <numOfRows>2</numOfRows>
+    <pageNo>1</pageNo>
+    <totalCount>2</totalCount>
+  </body>
+</response>
