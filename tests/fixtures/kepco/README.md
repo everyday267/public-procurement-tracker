@@ -1,12 +1,14 @@
 # KEPCO fixture
 
-⚠️ 현재 파일들은 **합성 샘플(placeholder)** 이다. 개발 환경에서
-openapi.kepco.co.kr·data.go.kr 접속이 차단되어 실제 응답을 확보할 수 없었다
-(실행계획 §1.3).
+`notices.json`은 2026-07-03 사용자 제공 **"전자입찰 계약정보" API 기술문서**의
+응답 필드 명세·샘플을 기반으로 작성한 fixture다 (필드명·코드값은 실명세와 일치,
+데이터 값은 합성).
 
-사용자가 공공데이터포털 "한국전력공사_전자입찰계약정보"(데이터셋 15148223)
-활용신청 후 실제 응답 샘플(공고·낙찰·계약 각 1~2건)을 제공하면:
+- 엔드포인트: `https://bigdata.kepco.co.kr/openapi/v1/electContract.do`
+- 응답: JSON `{"data": [...]}` — 페이지네이션 없음, 기간 최대 90일
+- 값 없는 필드는 `"-"` 문자열로 온다 (어댑터에서 None 처리)
+- 코드값: `itemType` Construction/Service, `purchaseType` Product/ConstructionService,
+  `competitionType` Open/Destination/Limited/Private, `progressState` 6종
 
-1. 이 디렉토리의 XML/JSON을 실제 응답으로 교체
-2. `src/adapters/kepco.py` 의 `_FIELD_CANDIDATES`·`_PARAM_DATE_*`·오퍼레이션명 확정
-3. `tests/test_kepco_adapter.py` 재실행으로 매핑 검증
+실서비스 검증(실행계획 §2.7) 시 실제 응답 1~2건을 이 파일에 추가·교체하면
+매핑 검증이 더 정확해진다.

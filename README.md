@@ -24,11 +24,13 @@
 | 국가철도공단 (`kr_rail.py`, 나라장터 경유) | ✅ | ✅ | 🔲 |
 | 한전 KEPCO (`kepco.py`, 공공데이터포털 OpenAPI) | ✅ | ✅ | 🔲 |
 
-> KEPCO는 공공데이터포털 "한국전력공사_전자입찰계약정보" OpenAPI를 1차 경로로,
-> srm.kepco.net XHR 스크래핑을 폴백으로 수집합니다 (실행계획 §2.1).
-> 실서비스 응답 필드명·낙찰/계약 오퍼레이션은 기술문서·샘플 확보 후 확정이 필요하며
-> (`src/adapters/kepco.py`의 `_FIELD_CANDIDATES` 참고), `KEPCO_API_KEY` 미설정 시
-> 해당 소스는 경고 후 skip 됩니다.
+> KEPCO는 한전 빅데이터플랫폼 "전자입찰 계약정보" OpenAPI
+> (`bigdata.kepco.co.kr/openapi/v1/electContract.do`)로 수집합니다 (명세 확정,
+> 기간 최대 90일 → 자동 분할). 이 API는 입찰공고 전용이라 낙찰·계약은 G2B
+> 계약정보(`dmndInsttNm=한국전력공사`)로 보완하며, srm.kepco.net XHR은 커버리지
+> 미달 시 폴백입니다. `KEPCO_API_KEY` 미설정 시 해당 소스는 경고 후 skip 됩니다.
+> 같은 API가 `companyId`로 발전 자회사(서부·남부·중부·남동·동서발전)도 지원하므로
+> Phase 2 발전 5사는 본 어댑터 재사용이 유력합니다 (`kepco.COMPANY_IDS` 참고).
 
 ## 실행
 
