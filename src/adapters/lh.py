@@ -55,18 +55,26 @@ class LHAdapter:
             items.append(d)
         return items
 
-    def _paginate(self, endpoint: str, params: dict, page_size: int = 100) -> Iterator[dict]:
+    def _paginate(self, endpoint: str, params: dict, page_size: int = 500) -> Iterator[dict]:
+        # page_size를 100→500으로 키워 요청 수를 1/5로 줄인다. LH e-Bid는 짧은
+        # 시간 다수 요청 시 커넥션을 거부(throttle)하는 경향이 있어, 페이지 수를
+        # 줄이는 것이 속도·안정성 모두에 유리하다.
         page = 1
+        fetched = 0
         while True:
             root = self._get(endpoint, {**params, "numOfRows": page_size, "pageNo": page})
             rows = self._items(root)
             for row in rows:
                 yield row
+            fetched += len(rows)
             total = int(root.findtext(".//totalCount") or 0)
-            logger.debug("[LH] %s page=%d total=%d fetched=%d", endpoint, page, total, page * page_size)
-            if page * page_size >= total:
+            if page == 1 and total > 2000:
+                logger.info("[LH] %s totalCount=%d — 대량 수집 시작", endpoint, total)
+            if page * page_size >= total or not rows:
                 break
             page += 1
+            if page % 20 == 0:
+                logger.info("[LH] %s 진행 page=%d fetched=%d/%d", endpoint, page, fetched, total)
 
     # ── Fetch ──────────────────────────────────────────────────────────────
 

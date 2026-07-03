@@ -119,6 +119,13 @@ def _fetch_all(adapter, start: date, until: date) -> Tuple[list, list, list]:
     )
 
 
+def _log_schema(kind: str, rows: list) -> None:
+    """원본 레코드의 실제 필드명을 1회 로그로 남긴다(스키마 파악·모델 설계용)."""
+    if rows:
+        logger.info("[schema] %s 레코드 %d건, 필드=%s",
+                    kind, len(rows), sorted(rows[0].keys()))
+
+
 # ── 조인 ──────────────────────────────────────────────────────────────────
 
 def _select(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
@@ -258,6 +265,9 @@ def run(month: Optional[str] = None, db_path: str = "procurement.db", output_dir
         try:
             adapter = SOURCES["lh"]()
             rn, ra, rc = _fetch_all(adapter, start, end)
+            _log_schema("LH 공고", rn)
+            _log_schema("LH 개찰", ra)
+            _log_schema("LH 계약", rc)
             if _process_source(conn, "lh", adapter, rn, ra, rc, label, output_dir, all_joined):
                 any_success = True
         except Exception as e:
@@ -287,6 +297,9 @@ def run(month: Optional[str] = None, db_path: str = "procurement.db", output_dir
             raw_c = list(g2b.fetch_contracts_scoped(target_nos, start, end))
             logger.info("[G2B 공용] 수집 완료: 공고=%d 낙찰=%d 계약=%d",
                         len(raw_n), len(raw_a), len(raw_c))
+            _log_schema("G2B 공고", raw_n)
+            _log_schema("G2B 낙찰", raw_a)
+            _log_schema("G2B 계약", raw_c)
         except Exception as e:
             logger.exception("[G2B 공용] 전국 수집 실패 — g2b_opnstd·kr_rail 모두 스킵")
             for source in g2b_family:
