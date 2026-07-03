@@ -260,8 +260,18 @@ def run(month: str, db_path: str = "procurement.db", output_dir: str = "output",
         started_at = datetime.now().isoformat()
         try:
             g2b = SOURCES["g2b_opnstd"]()
-            raw_n, raw_a, raw_c = _fetch_all(g2b, start, end)
-            logger.info("[G2B 공용] 전국 원본: 공고=%d 낙찰=%d 계약=%d",
+            # 1) 공고는 전국 1회 수집. 2) 그중 공사 100억↑ 공고번호(target_nos)를
+            #    구해, 3) 계약·낙찰은 그 공고번호로만 스코프 조회한다(전국 순회 회피).
+            raw_n = list(g2b.fetch_notices(start, end))
+            g2b_norm = _normalize_notices(g2b, raw_n)
+            target_nos = {n.get("notice_no") for n in g2b_norm
+                          if n.get("work_type") == "공사"
+                          and g2b.passes_filter(n) and n.get("notice_no")}
+            logger.info("[G2B 공용] 전국 공고=%d, 대상(공사100억↑)=%d → 계약·낙찰은 대상 공고번호로만 조회",
+                        len(raw_n), len(target_nos))
+            raw_a = list(g2b.fetch_awards_scoped(target_nos, start, end))
+            raw_c = list(g2b.fetch_contracts_scoped(target_nos, start, end))
+            logger.info("[G2B 공용] 수집 완료: 공고=%d 낙찰=%d 계약=%d",
                         len(raw_n), len(raw_a), len(raw_c))
         except Exception as e:
             logger.exception("[G2B 공용] 전국 수집 실패 — g2b_opnstd·kr_rail 모두 스킵")

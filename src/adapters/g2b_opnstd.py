@@ -14,7 +14,7 @@ import logging
 import os
 import time
 from datetime import date, timedelta
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Callable, Dict, Iterator, List, Optional, Tuple
 from urllib.parse import unquote
 
 import requests
@@ -42,6 +42,10 @@ _LT_KEYS = ["cntrctCnclsMthdNm", "bidNtceNm", "lngTmCntrctYn"]
 
 # 1주일 제한이 걸린 오퍼레이션의 최대 조회 일수
 _WEEKLY_LIMIT_DAYS = 7
+
+# bidNtceNo 서버측 필터 지원 여부 판별 임계값. 특정 공고번호로 조회했을 때
+# totalCount가 이보다 크면 필터가 무시된 것(전국 반환)으로 보고 폴백한다.
+_SCOPE_PROBE_MAX = 500
 
 
 class G2BOpnStdAdapter(BaseProcurementAdapter):
@@ -219,6 +223,88 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
         insttDivCd/insttCd 미지정 시 전체 기관 조회.
         """
         for item in self._request_weekly_chunks(_CONTRACT_OP, since, until, {}):
+            yield item
+
+    # ── 대상 공고번호(bidNtceNo) 기반 스코프 조회 ──────────────────────────
+    #
+    # 개방표준 계약/낙찰 API는 서버측 기관·공사 필터가 없어 전국을 전부
+    # 순회해야 했다(월 수십분). 우리가 필요한 건 필터된 공고(공사 100억↑)에
+    # 매칭되는 건뿐이므로, bidNtceNo로 좁혀 조회한다. 단 이 파라미터가
+    # 서버측에서 실제로 적용되는지 불확실하므로 probe로 검증하고, 미지원이면
+    # 기존 전국 스윕으로 안전하게 폴백한다.
+
+    def _weekly_windows(self, since, until):
+        # type: (date, date) -> Iterator[Tuple[date, date]]
+        cursor = since
+        while cursor <= until:
+            end = min(cursor + timedelta(days=_WEEKLY_LIMIT_DAYS - 1), until)
+            yield cursor, end
+            cursor = end + timedelta(days=1)
+
+    def _contract_params(self, ws, we):
+        # type: (date, date) -> dict
+        return {
+            "cntrctCnclsBgnDate": ws.strftime("%Y%m%d"),
+            "cntrctCnclsEndDate": we.strftime("%Y%m%d"),
+        }
+
+    def _award_params(self, ws, we):
+        # type: (date, date) -> dict
+        return {
+            "bsnsDivCd": _BSNS_DIV_CONSTRUCTION,
+            "opengBgnDt": ws.strftime("%Y%m%d") + "0000",
+            "opengEndDt": we.strftime("%Y%m%d") + "2359",
+        }
+
+    def _total_count(self, operation, params):
+        # type: (str, dict) -> Optional[int]
+        """numOfRows=1로 totalCount만 조회. 실패 시 None."""
+        url = "{}/{}".format(_BASE_URL, operation)
+        query = {"serviceKey": self.api_key, "type": "json", "numOfRows": 1, "pageNo": 1}
+        query.update(params)
+        try:
+            resp = get_with_retry(url, query, timeout=self.timeout,
+                                  session=self.session, label="G2B")
+            body = resp.json().get("response", {}).get("body", {})
+            return int(body.get("totalCount", 0) or 0)
+        except Exception:
+            return None
+
+    def _fetch_scoped_or_sweep(self, operation, notice_nos, since, until, param_builder):
+        # type: (str, set, date, date, Callable) -> Iterator[Dict]
+        """bidNtceNo 스코프 조회. 서버측 필터 미지원이면 전국 스윕 폴백."""
+        if not notice_nos:
+            return  # 대상 공고 없음 → 조회 불필요
+        windows = list(self._weekly_windows(since, until))
+        sample = next(iter(notice_nos))
+        probe = self._total_count(operation, dict(param_builder(*windows[0]), bidNtceNo=sample))
+        if probe is not None and probe <= _SCOPE_PROBE_MAX:
+            logger.info("[G2B] %s: bidNtceNo 서버측 필터 사용 (공고 %d개 × 주 %d개)",
+                        operation, len(notice_nos), len(windows))
+            for no in notice_nos:
+                for ws, we in windows:
+                    params = dict(param_builder(ws, we), bidNtceNo=no)
+                    for item in self._request(operation, params, max_pages=5):
+                        yield item
+        else:
+            logger.warning("[G2B] %s: bidNtceNo 필터 미지원(probe=%s) → 전국 스윕 폴백",
+                           operation, probe)
+            for ws, we in windows:
+                for item in self._request(operation, param_builder(ws, we)):
+                    yield item
+
+    def fetch_contracts_scoped(self, notice_nos, since, until):
+        # type: (set, date, date) -> Iterator[Dict]
+        """필터된 공고번호에 대한 계약만 조회 (전국 순회 회피)."""
+        for item in self._fetch_scoped_or_sweep(
+                _CONTRACT_OP, notice_nos, since, until, self._contract_params):
+            yield item
+
+    def fetch_awards_scoped(self, notice_nos, since, until):
+        # type: (set, date, date) -> Iterator[Dict]
+        """필터된 공고번호에 대한 낙찰만 조회 (전국 순회 회피)."""
+        for item in self._fetch_scoped_or_sweep(
+                _AWARD_OP, notice_nos, since, until, self._award_params):
             yield item
 
     def normalize(self, raw):

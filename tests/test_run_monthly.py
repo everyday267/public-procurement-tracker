@@ -75,25 +75,25 @@ def test_g2b_family_fetches_once_and_kr_rail_is_subset():
         calls["n"] += 1
         return iter([n_kr, n_g])
 
-    def awards(s, u):
+    def awards_scoped(notice_nos, s, u):
         calls["a"] += 1
         return iter([a_kr])
 
-    def contracts(s, u):
+    def contracts_scoped(notice_nos, s, u):
         calls["c"] += 1
         return iter([c_kr])
 
     with tempfile.TemporaryDirectory() as tmp:
         with patch.dict(os.environ, {"G2B_API_KEY": "dummy"}), \
              patch.object(G2BOpnStdAdapter, "fetch_notices", side_effect=notices), \
-             patch.object(G2BOpnStdAdapter, "fetch_awards", side_effect=awards), \
-             patch.object(G2BOpnStdAdapter, "fetch_contracts", side_effect=contracts), \
+             patch.object(G2BOpnStdAdapter, "fetch_awards_scoped", side_effect=awards_scoped), \
+             patch.object(G2BOpnStdAdapter, "fetch_contracts_scoped", side_effect=contracts_scoped), \
              patch.object(KRRailAdapter, "_is_kr_rail",
                           side_effect=lambda r: "국가철도공단" in (r.get("dmndInsttNm", "") or "")):
             rm.run("2026-06", db_path=f"{tmp}/t.db", output_dir=f"{tmp}/o",
                    sources=["g2b_opnstd", "kr_rail"])
 
-        # 전국 fetch는 소스가 2개여도 각 1회만 (중복 제거).
+        # 공고 전국 fetch 1회 + 계약·낙찰 스코프 조회 각 1회 (소스가 2개여도 공유).
         assert calls == {"n": 1, "a": 1, "c": 1}
 
         conn = sqlite3.connect(f"{tmp}/t.db")

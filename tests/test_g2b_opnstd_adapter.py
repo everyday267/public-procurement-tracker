@@ -189,3 +189,53 @@ def test_award_weekly_chunk_split(adapter):
             until=date(2026, 6, 21),
         ))
         assert mock_req.call_count == 3
+
+
+# ------------------------------------------------------------------ #
+# bidNtceNo 스코프 조회 (probe 검증 + 폴백)                            #
+# ------------------------------------------------------------------ #
+
+def test_scoped_contracts_uses_bidntceno_when_filter_supported(adapter):
+    """probe totalCount가 작으면 공고번호별 스코프 조회를 쓴다."""
+    with patch.object(adapter, "_total_count", return_value=1) as probe, \
+         patch.object(adapter, "_request", return_value=iter([])) as req:
+        list(adapter.fetch_contracts_scoped(
+            {"N1", "N2"}, date(2026, 6, 1), date(2026, 6, 30)))
+    probe.assert_called_once()
+    # 공고 2개 × 주 5개(6/1~6/30) = 10회, 모두 bidNtceNo 포함
+    assert req.call_count == 10
+    for call in req.call_args_list:
+        assert "bidNtceNo" in call.args[1]
+
+
+def test_scoped_contracts_falls_back_to_sweep_when_filter_ignored(adapter):
+    """probe totalCount가 크면(필터 무시) 전국 스윕으로 폴백한다."""
+    with patch.object(adapter, "_total_count", return_value=99999), \
+         patch.object(adapter, "_request", return_value=iter([])) as req:
+        list(adapter.fetch_contracts_scoped(
+            {"N1"}, date(2026, 6, 1), date(2026, 6, 30)))
+    # 폴백: 주 5개 스윕, bidNtceNo 없음
+    assert req.call_count == 5
+    for call in req.call_args_list:
+        assert "bidNtceNo" not in call.args[1]
+
+
+def test_scoped_empty_notice_set_fetches_nothing(adapter):
+    """대상 공고가 없으면 아무 요청도 하지 않는다."""
+    with patch.object(adapter, "_total_count") as probe, \
+         patch.object(adapter, "_request") as req:
+        result = list(adapter.fetch_contracts_scoped(
+            set(), date(2026, 6, 1), date(2026, 6, 30)))
+    assert result == []
+    probe.assert_not_called()
+    req.assert_not_called()
+
+
+def test_scoped_probe_none_falls_back(adapter):
+    """probe가 None(오류)이면 안전하게 전국 스윕으로 폴백한다."""
+    with patch.object(adapter, "_total_count", return_value=None), \
+         patch.object(adapter, "_request", return_value=iter([])) as req:
+        list(adapter.fetch_awards_scoped(
+            {"N1"}, date(2026, 6, 1), date(2026, 6, 7)))
+    assert req.call_count == 1  # 1주 스윕
+    assert "bidNtceNo" not in req.call_args_list[0].args[1]
