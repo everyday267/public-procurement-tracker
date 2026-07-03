@@ -15,6 +15,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from dateutil.relativedelta import relativedelta
 import pandas as pd
 
+from src.adapters.base import CONSTRUCTION_MIN_PRICE
 from src.adapters.lh import LHAdapter
 from src.adapters.g2b_opnstd import G2BOpnStdAdapter
 from src.adapters.kr_rail import KRRailAdapter
@@ -49,6 +50,22 @@ NOTICE_COLS = [
 AWARD_COLS = ["notice_no", "bidder_name", "bidder_biz_no", "award_price", "award_rate", "expect_price"]
 CONTRACT_COLS = ["notice_no", "contract_name", "contract_price", "contracted_at",
                   "contractor_name", "start_date", "end_date"]
+
+# 체결일 기준 100억↑ 공사계약 CSV 출력 컬럼 (목표 산출물).
+CONTRACT_OUT_COLS = [
+    "source", "contracted_at", "demand_inst", "contract_name", "bsns_div",
+    "contract_price", "total_contract_price", "is_long_term", "contract_method",
+    "contractor_name", "contractor_bizno", "contract_no", "notice_no",
+]
+
+
+def _is_target_contract(c: dict) -> bool:
+    """체결일 기준 대상 계약: 계약금액 100억↑ + 공사(구분 정보가 있으면 공사)."""
+    price = c.get("contract_price")
+    if price is None or price < CONSTRUCTION_MIN_PRICE:
+        return False
+    bd = c.get("bsns_div")
+    return bd is None or "공사" in str(bd)
 
 
 # ── 기간 계산 ──────────────────────────────────────────────────────────────
@@ -186,16 +203,31 @@ def _process_source(conn, source, adapter, raw_notices, raw_awards, raw_contract
         logger.info("  [%s] 개찰/낙찰 %d건 적재 (수집 %d건 중 대상 매칭)",
                     source, len(awards), len(raw_awards))
 
-        contracts = [c for c in _normalize_contracts(adapter, raw_contracts)
-                     if c.get("notice_no") in target_nos]
+        # 계약: 체결일(cntrctCnclsDate) 기준 독립 수집. 공고 매칭이 아니라
+        # 공사 + 계약금액 100억↑ 조건으로 직접 집계 → 공사이행보증서 대상 규모.
+        if hasattr(adapter, "is_large_construction_contract"):
+            raw_c_target = [r for r in raw_contracts if adapter.is_large_construction_contract(r)]
+        else:
+            raw_c_target = raw_contracts  # LH 등: 정규화 후 가격 기준으로 필터
+        contracts = [c for c in _normalize_contracts(adapter, raw_c_target)
+                     if _is_target_contract(c)]
         insert_contracts(conn, contracts)
-        logger.info("  [%s] 계약 %d건 적재 (수집 %d건 중 대상 매칭)",
+        logger.info("  [%s] 100억↑ 공사계약 %d건 적재 (전국 수집 %d건 중)",
                     source, len(contracts), len(raw_contracts))
+
+        # 계약 CSV (체결일 기준 100억↑ 공사계약 = 핵심 산출물)
+        if contracts:
+            cdf = pd.DataFrame(contracts)
+            cols = [c for c in CONTRACT_OUT_COLS if c in cdf.columns]
+            cpath = Path(output_dir) / f"{source}_contracts_{label}.csv"
+            cdf[cols].sort_values("contract_price", ascending=False).to_csv(
+                cpath, index=False, encoding="utf-8-sig")
+            logger.info("  [%s] 계약 CSV 저장: %s", source, cpath)
 
         joined = join_all(source, notices_ok, awards, contracts)
         csv_path = Path(output_dir) / f"{source}_joined_{label}.csv"
         joined.to_csv(csv_path, index=False, encoding="utf-8-sig")
-        logger.info("  [%s] CSV 저장: %s (%d행)", source, csv_path, len(joined))
+        logger.info("  [%s] 공고기준 조인 CSV 저장: %s (%d행)", source, csv_path, len(joined))
         all_joined.append(joined)
 
         ended_at = datetime.now().isoformat()

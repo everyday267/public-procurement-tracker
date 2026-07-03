@@ -47,6 +47,9 @@ _WEEKLY_LIMIT_DAYS = 7
 # totalCount가 이보다 크면 필터가 무시된 것(전국 반환)으로 보고 폴백한다.
 _SCOPE_PROBE_MAX = 500
 
+# 계약 규모 필터: 계약금액 100억 이상. (공사이행보증서 대상 계약 규모 파악)
+CONTRACT_MIN_PRICE = 10_000_000_000
+
 
 class G2BOpnStdAdapter(BaseProcurementAdapter):
     """PubDataOpnStdService 기반 어댑터.
@@ -343,6 +346,42 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
             "_contract_date":          raw.get("cntrctCnclsDate"),
             "_demand_inst":            raw.get("dmndInsttNm"),
         }
+
+    def normalize_contract(self, raw):
+        # type: (dict) -> dict
+        """계약 레코드를 계약 중심 스키마로 변환 (체결일 기준 독립 수집용).
+
+        getDataSetOpnStdCntrctInfo 실제 필드 기반. 공고 매칭 없이 계약 자체가
+        1급 데이터가 된다. rprsntCorpNm(계약상대자)이 사실상 낙찰자 역할.
+        """
+        return {
+            "source":               self.source,
+            "notice_no":            raw.get("bidNtceNo"),
+            "contract_no":          raw.get("cntrctNo"),
+            "unity_contract_no":    raw.get("untyCntrctNo"),
+            "contract_name":        raw.get("cntrctNm") or raw.get("bidNtceNm"),
+            "bsns_div":             raw.get("bsnsDivNm"),
+            "contract_price":       self._to_int(raw.get("cntrctAmt")),
+            "total_contract_price": self._to_int(raw.get("ttalCntrctAmt")),
+            "contracted_at":        raw.get("cntrctCnclsDate"),
+            "contract_method":      raw.get("cntrctCnclsMthdNm"),
+            "contract_status":      raw.get("cntrctCnclsSttusNm"),
+            "is_long_term":         raw.get("lngtrmCtnuDivNm"),
+            "demand_inst":          raw.get("dmndInsttNm"),
+            "contract_inst":        raw.get("cntrctInsttNm"),
+            "contractor_name":      raw.get("rprsntCorpNm"),
+            "contractor_bizno":     raw.get("rprsntCorpBizrno"),
+            "contract_period":      raw.get("cntrctPrd"),
+            "raw_payload":          raw,
+        }
+
+    def is_large_construction_contract(self, raw):
+        # type: (dict) -> bool
+        """공사 + 계약금액 100억↑ 계약인지 (raw 레코드 기준, 빠른 사전 필터)."""
+        if "공사" not in str(raw.get("bsnsDivNm", "")):
+            return False
+        amt = self._to_int(raw.get("cntrctAmt")) or self._to_int(raw.get("ttalCntrctAmt"))
+        return amt is not None and amt >= CONTRACT_MIN_PRICE
 
     def health_check(self):
         # type: () -> bool

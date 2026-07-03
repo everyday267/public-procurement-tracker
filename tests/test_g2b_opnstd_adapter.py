@@ -239,3 +239,40 @@ def test_scoped_probe_none_falls_back(adapter):
             {"N1"}, date(2026, 6, 1), date(2026, 6, 7)))
     assert req.call_count == 1  # 1주 스윕
     assert "bidNtceNo" not in req.call_args_list[0].args[1]
+
+
+# ------------------------------------------------------------------ #
+# 계약 중심 모델 (체결일 기준 100억↑ 공사계약)                          #
+# ------------------------------------------------------------------ #
+
+def test_normalize_contract_rich(adapter):
+    raw = {
+        "bidNtceNo": "R25BK001", "cntrctNo": "C-1", "untyCntrctNo": "U-1",
+        "cntrctNm": "○○도로 확장공사", "bsnsDivNm": "공사",
+        "cntrctAmt": "25000000000", "ttalCntrctAmt": "26000000000",
+        "cntrctCnclsDate": "2026-06-02", "cntrctCnclsMthdNm": "제한경쟁",
+        "cntrctCnclsSttusNm": "계약완료", "lngtrmCtnuDivNm": "장기계속",
+        "dmndInsttNm": "한국도로공사", "cntrctInsttNm": "조달청",
+        "rprsntCorpNm": "대형건설", "rprsntCorpBizrno": "111-11-11111",
+        "cntrctPrd": "2026-06-02~2028-06-01",
+    }
+    c = adapter.normalize_contract(raw)
+    assert c["contract_price"] == 25_000_000_000
+    assert c["total_contract_price"] == 26_000_000_000
+    assert c["contracted_at"] == "2026-06-02"
+    assert c["bsns_div"] == "공사"
+    assert c["demand_inst"] == "한국도로공사"
+    assert c["contractor_name"] == "대형건설"
+    assert c["contractor_bizno"] == "111-11-11111"
+    assert c["is_long_term"] == "장기계속"
+
+
+def test_is_large_construction_contract(adapter):
+    big = {"bsnsDivNm": "공사", "cntrctAmt": "25000000000"}
+    small = {"bsnsDivNm": "공사", "cntrctAmt": "500000000"}
+    service = {"bsnsDivNm": "용역", "cntrctAmt": "30000000000"}
+    at_threshold = {"bsnsDivNm": "공사", "cntrctAmt": str(10_000_000_000)}
+    assert adapter.is_large_construction_contract(big) is True
+    assert adapter.is_large_construction_contract(small) is False
+    assert adapter.is_large_construction_contract(service) is False
+    assert adapter.is_large_construction_contract(at_threshold) is True

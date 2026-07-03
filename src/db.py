@@ -94,21 +94,33 @@ CREATE TABLE IF NOT EXISTS awards (
   collected_at    TEXT DEFAULT (datetime('now'))
 );
 
+-- 계약은 "체결일(cntrctCnclsDate) 기준"으로 독립 수집한다. 공고 매칭이 아니라
+-- 공사(bsnsDivNm) + 계약금액 100억↑ 조건으로 직접 집계 → 공사이행보증서 대상
+-- 계약 규모 파악. notice_no는 있으면 참고용으로 저장하되 조인 필수는 아니다.
 CREATE TABLE IF NOT EXISTS contracts (
-  contract_id     INTEGER PRIMARY KEY AUTOINCREMENT,
-  source          TEXT,
-  notice_no       TEXT NOT NULL,
-  contract_no     TEXT,
-  contract_name   TEXT,
-  contract_price  INTEGER,
-  contracted_at   TEXT,
-  contract_method TEXT,
-  contractor_name TEXT,
-  contractor_type TEXT,
-  start_date      TEXT,
-  end_date        TEXT,
-  raw_payload     TEXT,
-  collected_at    TEXT DEFAULT (datetime('now'))
+  contract_id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  source                TEXT,
+  notice_no             TEXT,
+  contract_no           TEXT,
+  unity_contract_no     TEXT,
+  contract_name         TEXT,
+  bsns_div              TEXT,
+  contract_price        INTEGER,
+  total_contract_price  INTEGER,
+  contracted_at         TEXT,
+  contract_method       TEXT,
+  contract_status       TEXT,
+  is_long_term          TEXT,
+  demand_inst           TEXT,
+  contract_inst         TEXT,
+  contractor_name       TEXT,
+  contractor_bizno      TEXT,
+  contractor_type       TEXT,
+  contract_period       TEXT,
+  start_date            TEXT,
+  end_date              TEXT,
+  raw_payload           TEXT,
+  collected_at          TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS source_runs (
@@ -126,6 +138,8 @@ CREATE INDEX IF NOT EXISTS idx_notices_no          ON notices(notice_no);
 CREATE INDEX IF NOT EXISTS idx_notices_unpriced_no ON notices_unpriced(notice_no);
 CREATE INDEX IF NOT EXISTS idx_awards_no           ON awards(notice_no);
 CREATE INDEX IF NOT EXISTS idx_contracts_no        ON contracts(notice_no);
+CREATE INDEX IF NOT EXISTS idx_contracts_date      ON contracts(contracted_at);
+CREATE INDEX IF NOT EXISTS idx_contracts_inst      ON contracts(demand_inst);
 CREATE INDEX IF NOT EXISTS idx_notices_posted      ON notices(posted_at);
 """
 
