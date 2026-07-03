@@ -178,13 +178,22 @@ def run(month: str, db_path: str = "procurement.db", output_dir: str = "output",
             upsert_notices(conn, notices_ok)
             insert_unpriced_notices(conn, notices_unpriced)
 
+            # 개방표준 API는 서버측 기관/공사 필터가 없어 전국 낙찰·계약이 수집된다.
+            # 우리가 필요한 건 필터된 공고(공사 100억↑)에 매칭되는 건뿐이므로,
+            # 대상 공고번호 집합으로 좁혀서 DB/CSV에 전국 데이터가 쌓이지 않게 한다.
+            target_nos = {n.get("notice_no") for n in notices_ok if n.get("notice_no")}
+
             raw_awards, awards = _collect_awards(adapter, start, end)
+            awards = [a for a in awards if a.get("notice_no") in target_nos]
             insert_awards(conn, awards)
-            logger.info("  [%s] 개찰/낙찰 %d건 적재", source, len(awards))
+            logger.info("  [%s] 개찰/낙찰 %d건 적재 (전국 수집 %d건 중 대상 매칭)",
+                        source, len(awards), len(raw_awards))
 
             raw_contracts, contracts = _collect_contracts(adapter, start, end)
+            contracts = [c for c in contracts if c.get("notice_no") in target_nos]
             insert_contracts(conn, contracts)
-            logger.info("  [%s] 계약 %d건 적재", source, len(contracts))
+            logger.info("  [%s] 계약 %d건 적재 (전국 수집 %d건 중 대상 매칭)",
+                        source, len(contracts), len(raw_contracts))
 
             joined = join_all(source, notices_ok, awards, contracts)
             csv_path = Path(output_dir) / f"{source}_joined_{month.replace('-', '')}.csv"

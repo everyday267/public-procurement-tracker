@@ -10,6 +10,7 @@ OpenAPI 참고자료 기반:
   계약 API가 완비되어 있어 fetch_contracts()가 실제 동작함.
 """
 import hashlib
+import logging
 import os
 import time
 from datetime import date, timedelta
@@ -21,6 +22,12 @@ import requests
 from .base import BaseProcurementAdapter
 from ..http_client import get_with_retry
 from ..long_term_detector import detect_long_term_from_raw
+
+logger = logging.getLogger(__name__)
+
+# 무한/폭주 순회 방지용 페이지 상한 (999건×2000 = 약 200만 건). 실제로는
+# totalCount 기준으로 훨씬 먼저 종료된다. 상한 도달 시 경고 로그를 남긴다.
+_MAX_PAGES = 2000
 
 _BASE_URL = "https://apis.data.go.kr/1230000/ao/PubDataOpnStdService"
 _NOTICE_OP   = "getDataSetOpnStdBidPblancInfo"   # 입찰공고 (1개월 제한)
@@ -46,7 +53,7 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
     source = "g2b_opnstd"
     agency_codes = ["G2B"]
 
-    def __init__(self, api_key=None, timeout=30, rate_limit=1.0):
+    def __init__(self, api_key=None, timeout=30, rate_limit=0.2):
         # type: (Optional[str], int, float) -> None
         raw_key = api_key or os.getenv("G2B_API_KEY")
         if not raw_key:
@@ -64,12 +71,17 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
     # 내부 유틸                                                             #
     # ------------------------------------------------------------------ #
 
-    def _request(self, operation, params):
-        # type: (str, dict) -> List[Dict]
-        """단일 날짜 범위로 API 호출 → items 리스트 반환. 페이지네이션 자동 처리."""
+    def _request(self, operation, params, max_pages=_MAX_PAGES):
+        # type: (str, dict, int) -> Iterator[Dict]
+        """단일 날짜 범위로 API 호출 → items를 페이지 단위로 yield.
+
+        제너레이터라 호출부에서 스트리밍 필터가 가능하고 전체 결과를 메모리에
+        쌓지 않는다. totalCount/진행 상황을 로그로 남겨 대량 수집을 관측 가능하게
+        하고, max_pages 안전장치로 폭주를 막는다.
+        """
         url = "{}/{}".format(_BASE_URL, operation)
         page_no = 1
-        results = []
+        fetched = 0
 
         while True:
             query = {
@@ -85,7 +97,7 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
             data = resp.json()
 
             body = data.get("response", {}).get("body", {})
-            total_count = int(body.get("totalCount", 0))
+            total_count = int(body.get("totalCount", 0) or 0)
             items = body.get("items", [])
 
             if isinstance(items, dict):
@@ -94,14 +106,24 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
                 items = [items]
             items = items or []
 
-            results.extend(items)
-            time.sleep(self.rate_limit)
+            if page_no == 1 and total_count > 5000:
+                logger.info("[G2B] %s totalCount=%d — 대량 수집 시작", operation, total_count)
 
-            if len(results) >= total_count or not items:
+            for item in items:
+                yield item
+            fetched += len(items)
+
+            if fetched >= total_count or not items:
+                break
+            if page_no >= max_pages:
+                logger.warning("[G2B] %s max_pages=%d 도달, 중단 (total=%d fetched=%d)",
+                               operation, max_pages, total_count, fetched)
                 break
             page_no += 1
-
-        return results
+            if page_no % 50 == 0:
+                logger.info("[G2B] %s 진행 page=%d fetched=%d/%d",
+                            operation, page_no, fetched, total_count)
+            time.sleep(self.rate_limit)
 
     def _request_weekly_chunks(self, operation, since, until, extra_params):
         # type: (str, date, date, dict) -> Iterator[Dict]
@@ -239,10 +261,13 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
     def health_check(self):
         # type: () -> bool
         try:
-            items = self._request(
+            # 첫 페이지만 확인 (max_pages=1). 예외 없이 순회되면 정상.
+            for _ in self._request(
                 _NOTICE_OP,
                 {"bidNtceBgnDt": "202601010000", "bidNtceEndDt": "202601072359"},
-            )
-            return isinstance(items, list)
+                max_pages=1,
+            ):
+                break
+            return True
         except Exception:
             return False
