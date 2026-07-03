@@ -69,8 +69,9 @@ class KRRailAdapter(G2BOpnStdAdapter):
         """G2B 정규화 결과에 source를 kr_rail로 덮어쓴다."""
         normalized = super().normalize(raw)
         normalized["source"] = self.source
+        normalized["agency_code"] = "KR_RAIL"
         normalized["notice_id"] = normalized["notice_id"].replace(
-            "g2b:", "kr_rail:", 1
+            "g2b_opnstd:", "kr_rail:", 1
         )
         return normalized
 
