@@ -61,56 +61,62 @@ def month_bounds(ym: str) -> tuple[date, date]:
 
 
 # ── 어댑터 형태 흡수 (LH: notice/award/contract 3분리, G2B계열: 단일 normalize) ──
+#
+# 가져오기(fetch)와 정규화(normalize)를 분리한다. G2B 계열(g2b_opnstd·kr_rail)은
+# 같은 나라장터 개방표준 API를 쓰므로, run()에서 전국 원본을 1회만 fetch하고
+# 각 소스가 그 원본을 정규화·필터링하도록 하여 중복 전국 순회를 없앤다.
 
-def _collect_notices(adapter, start: date, until: date) -> Tuple[list, list]:
-    raw = list(adapter.fetch_notices(start, until))
+def _normalize_notices(adapter, raw: list) -> list:
     if hasattr(adapter, "normalize_notice"):
-        notices = [adapter.normalize_notice(r) for r in raw]
-    else:
-        # G2B계열 normalize()는 낙찰/계약 임시필드(_award_*, _contract_*)를
-        # 같은 dict에 함께 담아 반환한다. notices 테이블에는 불필요하므로 제거.
-        notices = [{k: v for k, v in adapter.normalize(r).items() if not k.startswith("_")} for r in raw]
-    return raw, notices
+        return [adapter.normalize_notice(r) for r in raw]
+    # G2B계열 normalize()는 낙찰/계약 임시필드(_award_*, _contract_*)를
+    # 같은 dict에 함께 담아 반환한다. notices 테이블에는 불필요하므로 제거.
+    return [{k: v for k, v in adapter.normalize(r).items() if not k.startswith("_")} for r in raw]
 
 
-def _collect_awards(adapter, start: date, until: date) -> Tuple[list, list]:
-    raw = list(adapter.fetch_awards(start, until))
+def _normalize_awards(adapter, raw: list) -> list:
     if hasattr(adapter, "normalize_award"):
-        awards = [adapter.normalize_award(r) for r in raw]
-    else:
-        awards = []
-        for r in raw:
-            n = adapter.normalize(r)
-            awards.append({
-                "source":        n.get("source"),
-                "notice_no":     n.get("notice_no"),
-                "bidder_name":   n.get("_award_corp"),
-                "bidder_biz_no": n.get("_award_corp_bizrno"),
-                "award_price":   n.get("_award_amt"),
-                "award_rate":    n.get("_award_rate"),
-                "winner_status": "낙찰" if n.get("_award_corp") else None,
-                "raw_payload":   r,
-            })
-    return raw, awards
+        return [adapter.normalize_award(r) for r in raw]
+    awards = []
+    for r in raw:
+        n = adapter.normalize(r)
+        awards.append({
+            "source":        n.get("source"),
+            "notice_no":     n.get("notice_no"),
+            "bidder_name":   n.get("_award_corp"),
+            "bidder_biz_no": n.get("_award_corp_bizrno"),
+            "award_price":   n.get("_award_amt"),
+            "award_rate":    n.get("_award_rate"),
+            "winner_status": "낙찰" if n.get("_award_corp") else None,
+            "raw_payload":   r,
+        })
+    return awards
 
 
-def _collect_contracts(adapter, start: date, until: date) -> Tuple[list, list]:
-    raw = list(adapter.fetch_contracts(start, until))
+def _normalize_contracts(adapter, raw: list) -> list:
     if hasattr(adapter, "normalize_contract"):
-        contracts = [adapter.normalize_contract(r) for r in raw]
-    else:
-        contracts = []
-        for r in raw:
-            n = adapter.normalize(r)
-            contracts.append({
-                "source":         n.get("source"),
-                "notice_no":      n.get("notice_no"),
-                "contract_name":  n.get("title"),
-                "contract_price": n.get("_contract_amt"),
-                "contracted_at":  n.get("_contract_date"),
-                "raw_payload":    r,
-            })
-    return raw, contracts
+        return [adapter.normalize_contract(r) for r in raw]
+    contracts = []
+    for r in raw:
+        n = adapter.normalize(r)
+        contracts.append({
+            "source":         n.get("source"),
+            "notice_no":      n.get("notice_no"),
+            "contract_name":  n.get("title"),
+            "contract_price": n.get("_contract_amt"),
+            "contracted_at":  n.get("_contract_date"),
+            "raw_payload":    r,
+        })
+    return contracts
+
+
+def _fetch_all(adapter, start: date, until: date) -> Tuple[list, list, list]:
+    """어댑터에서 공고·낙찰·계약 원본을 각각 materialize."""
+    return (
+        list(adapter.fetch_notices(start, until)),
+        list(adapter.fetch_awards(start, until)),
+        list(adapter.fetch_contracts(start, until)),
+    )
 
 
 # ── 조인 ──────────────────────────────────────────────────────────────────
@@ -147,6 +153,75 @@ def join_all(source: str, notices: list[dict], awards: list[dict], contracts: li
 
 # ── 메인 ──────────────────────────────────────────────────────────────────
 
+def _process_source(conn, source, adapter, raw_notices, raw_awards, raw_contracts,
+                    month, output_dir, all_joined) -> bool:
+    """이미 fetch된 원본을 정규화·필터링·적재하고 조인 CSV를 만든다. 성공 여부 반환."""
+    run_id = str(uuid.uuid4())[:8]
+    started_at = datetime.now().isoformat()
+    try:
+        notices = _normalize_notices(adapter, raw_notices)
+        notices_const = [n for n in notices if n.get("work_type") == "공사"]
+        notices_ok = [n for n in notices_const if adapter.passes_filter(n)]
+        notices_unpriced = [n for n in notices_const if n.get("estimated_price") is None]
+        logger.info("  [%s] 공고 전체=%d 공사=%d 100억이상=%d 미공개=%d",
+                    source, len(notices), len(notices_const), len(notices_ok), len(notices_unpriced))
+        upsert_notices(conn, notices_ok)
+        insert_unpriced_notices(conn, notices_unpriced)
+
+        # 개방표준 API는 서버측 기관/공사 필터가 없어 전국 낙찰·계약이 수집된다.
+        # 필요한 건 필터된 공고(공사 100억↑)에 매칭되는 건뿐이므로, 대상 공고번호
+        # 집합으로 좁혀서 DB/CSV에 전국 데이터가 쌓이지 않게 한다.
+        target_nos = {n.get("notice_no") for n in notices_ok if n.get("notice_no")}
+
+        awards = [a for a in _normalize_awards(adapter, raw_awards)
+                  if a.get("notice_no") in target_nos]
+        insert_awards(conn, awards)
+        logger.info("  [%s] 개찰/낙찰 %d건 적재 (수집 %d건 중 대상 매칭)",
+                    source, len(awards), len(raw_awards))
+
+        contracts = [c for c in _normalize_contracts(adapter, raw_contracts)
+                     if c.get("notice_no") in target_nos]
+        insert_contracts(conn, contracts)
+        logger.info("  [%s] 계약 %d건 적재 (수집 %d건 중 대상 매칭)",
+                    source, len(contracts), len(raw_contracts))
+
+        joined = join_all(source, notices_ok, awards, contracts)
+        csv_path = Path(output_dir) / f"{source}_joined_{month.replace('-', '')}.csv"
+        joined.to_csv(csv_path, index=False, encoding="utf-8-sig")
+        logger.info("  [%s] CSV 저장: %s (%d행)", source, csv_path, len(joined))
+        all_joined.append(joined)
+
+        ended_at = datetime.now().isoformat()
+        conn.execute("""
+            INSERT OR REPLACE INTO source_runs
+              (run_id, source, started_at, ended_at, status, fetched_count, filtered_count, error_message)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (run_id, source, started_at, ended_at, "success",
+              len(raw_notices) + len(raw_awards) + len(raw_contracts), len(notices_ok), None))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.exception("[%s] 처리 실패", source)
+        ended_at = datetime.now().isoformat()
+        conn.execute("""
+            INSERT OR REPLACE INTO source_runs
+              (run_id, source, started_at, ended_at, status, fetched_count, filtered_count, error_message)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (run_id, source, started_at, ended_at, "error", 0, 0, str(e)))
+        conn.commit()
+        return False
+
+
+def _record_fetch_error(conn, source, started_at, err) -> None:
+    conn.execute("""
+        INSERT OR REPLACE INTO source_runs
+          (run_id, source, started_at, ended_at, status, fetched_count, filtered_count, error_message)
+        VALUES (?,?,?,?,?,?,?,?)
+    """, (str(uuid.uuid4())[:8], source, started_at, datetime.now().isoformat(),
+          "error", 0, 0, str(err)))
+    conn.commit()
+
+
 def run(month: str, db_path: str = "procurement.db", output_dir: str = "output",
         sources: Optional[List[str]] = None) -> str:
     active = sources or list(SOURCES.keys())
@@ -162,63 +237,54 @@ def run(month: str, db_path: str = "procurement.db", output_dir: str = "output",
     all_joined = []
     any_success = False
 
-    for source in active:
-        run_id = str(uuid.uuid4())[:8]
+    # ── LH: 자체 OpenAPI (LH로 이미 범위 한정됨) ────────────────────────────
+    if "lh" in active:
+        logger.info("=== [lh] 수집 시작 | %s ~ %s ===", start, end)
         started_at = datetime.now().isoformat()
-        logger.info("=== [%s] 수집 시작 | %s ~ %s | run_id=%s ===", source, start, end, run_id)
         try:
-            adapter = SOURCES[source]()
-
-            raw_notices, notices = _collect_notices(adapter, start, end)
-            notices_const = [n for n in notices if n.get("work_type") == "공사"]
-            notices_ok = [n for n in notices_const if adapter.passes_filter(n)]
-            notices_unpriced = [n for n in notices_const if n.get("estimated_price") is None]
-            logger.info("  [%s] 공고 전체=%d 공사=%d 100억이상=%d 미공개=%d",
-                        source, len(notices), len(notices_const), len(notices_ok), len(notices_unpriced))
-            upsert_notices(conn, notices_ok)
-            insert_unpriced_notices(conn, notices_unpriced)
-
-            # 개방표준 API는 서버측 기관/공사 필터가 없어 전국 낙찰·계약이 수집된다.
-            # 우리가 필요한 건 필터된 공고(공사 100억↑)에 매칭되는 건뿐이므로,
-            # 대상 공고번호 집합으로 좁혀서 DB/CSV에 전국 데이터가 쌓이지 않게 한다.
-            target_nos = {n.get("notice_no") for n in notices_ok if n.get("notice_no")}
-
-            raw_awards, awards = _collect_awards(adapter, start, end)
-            awards = [a for a in awards if a.get("notice_no") in target_nos]
-            insert_awards(conn, awards)
-            logger.info("  [%s] 개찰/낙찰 %d건 적재 (전국 수집 %d건 중 대상 매칭)",
-                        source, len(awards), len(raw_awards))
-
-            raw_contracts, contracts = _collect_contracts(adapter, start, end)
-            contracts = [c for c in contracts if c.get("notice_no") in target_nos]
-            insert_contracts(conn, contracts)
-            logger.info("  [%s] 계약 %d건 적재 (전국 수집 %d건 중 대상 매칭)",
-                        source, len(contracts), len(raw_contracts))
-
-            joined = join_all(source, notices_ok, awards, contracts)
-            csv_path = Path(output_dir) / f"{source}_joined_{month.replace('-', '')}.csv"
-            joined.to_csv(csv_path, index=False, encoding="utf-8-sig")
-            logger.info("  [%s] CSV 저장: %s (%d행)", source, csv_path, len(joined))
-            all_joined.append(joined)
-
-            ended_at = datetime.now().isoformat()
-            conn.execute("""
-                INSERT OR REPLACE INTO source_runs
-                  (run_id, source, started_at, ended_at, status, fetched_count, filtered_count, error_message)
-                VALUES (?,?,?,?,?,?,?,?)
-            """, (run_id, source, started_at, ended_at, "success",
-                  len(raw_notices) + len(raw_awards) + len(raw_contracts), len(notices_ok), None))
-            conn.commit()
-            any_success = True
+            adapter = SOURCES["lh"]()
+            rn, ra, rc = _fetch_all(adapter, start, end)
+            if _process_source(conn, "lh", adapter, rn, ra, rc, month, output_dir, all_joined):
+                any_success = True
         except Exception as e:
-            logger.exception("[%s] 수집 실패", source)
-            ended_at = datetime.now().isoformat()
-            conn.execute("""
-                INSERT OR REPLACE INTO source_runs
-                  (run_id, source, started_at, ended_at, status, fetched_count, filtered_count, error_message)
-                VALUES (?,?,?,?,?,?,?,?)
-            """, (run_id, source, started_at, ended_at, "error", 0, 0, str(e)))
-            conn.commit()
+            logger.exception("[lh] 수집 실패")
+            _record_fetch_error(conn, "lh", started_at, e)
+
+    # ── G2B 계열: 나라장터 개방표준 API를 1회만 fetch하여 공유 ──────────────
+    #    g2b_opnstd = 전국 전체, kr_rail = 그중 국가철도공단분.
+    #    (예전엔 소스마다 전국을 각각 재수집해 비용이 2배였다.)
+    g2b_family = [s for s in active if s in ("g2b_opnstd", "kr_rail")]
+    if g2b_family:
+        logger.info("=== [G2B 공용] 전국 수집 시작 | %s ~ %s | 대상 소스=%s ===",
+                    start, end, ",".join(g2b_family))
+        started_at = datetime.now().isoformat()
+        try:
+            g2b = SOURCES["g2b_opnstd"]()
+            raw_n, raw_a, raw_c = _fetch_all(g2b, start, end)
+            logger.info("[G2B 공용] 전국 원본: 공고=%d 낙찰=%d 계약=%d",
+                        len(raw_n), len(raw_a), len(raw_c))
+        except Exception as e:
+            logger.exception("[G2B 공용] 전국 수집 실패 — g2b_opnstd·kr_rail 모두 스킵")
+            for source in g2b_family:
+                _record_fetch_error(conn, source, started_at, e)
+            raw_n = None
+
+        if raw_n is not None:
+            for source in g2b_family:
+                if source == "kr_rail":
+                    kr = SOURCES["kr_rail"]()
+                    fn = [r for r in raw_n if kr._is_kr_rail(r)]
+                    fa = [r for r in raw_a if kr._is_kr_rail(r)]
+                    fc = [r for r in raw_c if kr._is_kr_rail(r)]
+                    logger.info("=== [kr_rail] 국가철도공단 필터 | 공고=%d 낙찰=%d 계약=%d ===",
+                                len(fn), len(fa), len(fc))
+                    if _process_source(conn, "kr_rail", kr, fn, fa, fc, month, output_dir, all_joined):
+                        any_success = True
+                else:
+                    logger.info("=== [g2b_opnstd] 전국 처리 ===")
+                    if _process_source(conn, "g2b_opnstd", g2b, raw_n, raw_a, raw_c,
+                                       month, output_dir, all_joined):
+                        any_success = True
 
     if all_joined:
         combined = pd.concat(all_joined, ignore_index=True)
