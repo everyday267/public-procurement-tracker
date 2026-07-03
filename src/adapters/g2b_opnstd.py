@@ -14,10 +14,12 @@ import os
 import time
 from datetime import date, timedelta
 from typing import Dict, Iterator, List, Optional, Tuple
+from urllib.parse import unquote
 
 import requests
 
 from .base import BaseProcurementAdapter
+from ..http_client import get_with_retry
 from ..long_term_detector import detect_long_term_from_raw
 
 _BASE_URL = "https://apis.data.go.kr/1230000/ao/PubDataOpnStdService"
@@ -46,11 +48,17 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
 
     def __init__(self, api_key=None, timeout=30, rate_limit=1.0):
         # type: (Optional[str], int, float) -> None
-        self.api_key = api_key or os.getenv("G2B_API_KEY")
+        raw_key = api_key or os.getenv("G2B_API_KEY")
+        if not raw_key:
+            raise ValueError("G2B_API_KEY 환경변수가 없습니다.")
+        # data.go.kr 키는 Encoding/Decoding 두 형태가 있다. 이미 URL 인코딩된
+        # 키(%2B, %2F 포함)를 그대로 requests에 넘기면 이중 인코딩(%→%25)되어
+        # 게이트웨이가 403을 반환한다. 한 번 unquote 해두면 어느 형태든
+        # 최종적으로 requests가 올바르게 단일 인코딩한다.
+        self.api_key = unquote(raw_key)
         self.timeout = timeout
         self.rate_limit = rate_limit
-        if not self.api_key:
-            raise ValueError("G2B_API_KEY 환경변수가 없습니다.")
+        self.session = requests.Session()
 
     # ------------------------------------------------------------------ #
     # 내부 유틸                                                             #
@@ -71,8 +79,9 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
                 "pageNo": page_no,
             }
             query.update(params)
-            resp = requests.get(url, params=query, timeout=self.timeout)
-            resp.raise_for_status()
+            resp = get_with_retry(
+                url, query, timeout=self.timeout, session=self.session, label="G2B",
+            )
             data = resp.json()
 
             body = data.get("response", {}).get("body", {})

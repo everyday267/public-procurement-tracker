@@ -15,6 +15,20 @@ def adapter():
     return G2BOpnStdAdapter(api_key="test-key")
 
 
+def test_encoding_key_is_normalized():
+    """이미 URL 인코딩된 키(%2B, %2F)를 unquote 하여 이중 인코딩을 방지해야 함."""
+    enc = "abc%2Bdef%2Fghi%3D%3D"
+    a = G2BOpnStdAdapter(api_key=enc)
+    assert a.api_key == "abc+def/ghi=="
+
+
+def test_decoding_key_unchanged():
+    """이미 디코딩된 원문 키는 unquote 해도 그대로여야 함 (멱등)."""
+    dec = "abc+def/ghi=="
+    a = G2BOpnStdAdapter(api_key=dec)
+    assert a.api_key == "abc+def/ghi=="
+
+
 # ------------------------------------------------------------------ #
 # normalize 테스트 — 입찰공고 raw                                      #
 # ------------------------------------------------------------------ #

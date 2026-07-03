@@ -1,5 +1,4 @@
 import os
-import time
 import json
 import hashlib
 import logging
@@ -8,11 +7,14 @@ from datetime import date
 from typing import Iterator, Optional
 from xml.etree import ElementTree as ET
 
+from ..http_client import get_with_retry
+
 logger = logging.getLogger(__name__)
 
 BASE_URL = "http://openapi.ebid.lh.or.kr/ebid.com.openapi.service"
 CONSTRUCTION_MIN_PRICE = 10_000_000_000  # 100억 VAT 제외
 REQUEST_INTERVAL = 1.0  # 초당 최대 1 req
+MAX_RETRIES = 4         # 커넥션 거부/타임아웃 시 지수 백오프 재시도 횟수
 
 
 class LHAdapter:
@@ -29,15 +31,19 @@ class LHAdapter:
         self.timeout = timeout
         if not self.service_key:
             raise ValueError("LH_API_KEY 환경변수 또는 service_key 인자 필요")
+        # keep-alive 세션: 매 요청마다 새 커넥션을 열면 LH e-Bid가 거부(Connection
+        # refused)하는 패턴이 있어 커넥션을 재사용한다.
+        self.session = requests.Session()
 
     # ── HTTP ──────────────────────────────────────────────────────────────
 
     def _get(self, endpoint: str, params: dict) -> ET.Element:
         url = f"{BASE_URL}.{endpoint}.dev"
         params = {**params, "serviceKey": self.service_key}
-        time.sleep(REQUEST_INTERVAL)
-        r = requests.get(url, params=params, timeout=self.timeout)
-        r.raise_for_status()
+        r = get_with_retry(
+            url, params, timeout=self.timeout, session=self.session,
+            max_retries=MAX_RETRIES, sleep_before=REQUEST_INTERVAL, label="LH",
+        )
         return ET.fromstring(r.text)
 
     def _items(self, root: ET.Element) -> list[dict]:
