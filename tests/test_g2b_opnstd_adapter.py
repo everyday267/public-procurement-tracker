@@ -15,6 +15,20 @@ def adapter():
     return G2BOpnStdAdapter(api_key="test-key")
 
 
+def test_encoding_key_is_normalized():
+    """이미 URL 인코딩된 키(%2B, %2F)를 unquote 하여 이중 인코딩을 방지해야 함."""
+    enc = "abc%2Bdef%2Fghi%3D%3D"
+    a = G2BOpnStdAdapter(api_key=enc)
+    assert a.api_key == "abc+def/ghi=="
+
+
+def test_decoding_key_unchanged():
+    """이미 디코딩된 원문 키는 unquote 해도 그대로여야 함 (멱등)."""
+    dec = "abc+def/ghi=="
+    a = G2BOpnStdAdapter(api_key=dec)
+    assert a.api_key == "abc+def/ghi=="
+
+
 # ------------------------------------------------------------------ #
 # normalize 테스트 — 입찰공고 raw                                      #
 # ------------------------------------------------------------------ #
@@ -175,3 +189,90 @@ def test_award_weekly_chunk_split(adapter):
             until=date(2026, 6, 21),
         ))
         assert mock_req.call_count == 3
+
+
+# ------------------------------------------------------------------ #
+# bidNtceNo 스코프 조회 (probe 검증 + 폴백)                            #
+# ------------------------------------------------------------------ #
+
+def test_scoped_contracts_uses_bidntceno_when_filter_supported(adapter):
+    """probe totalCount가 작으면 공고번호별 스코프 조회를 쓴다."""
+    with patch.object(adapter, "_total_count", return_value=1) as probe, \
+         patch.object(adapter, "_request", return_value=iter([])) as req:
+        list(adapter.fetch_contracts_scoped(
+            {"N1", "N2"}, date(2026, 6, 1), date(2026, 6, 30)))
+    probe.assert_called_once()
+    # 공고 2개 × 주 5개(6/1~6/30) = 10회, 모두 bidNtceNo 포함
+    assert req.call_count == 10
+    for call in req.call_args_list:
+        assert "bidNtceNo" in call.args[1]
+
+
+def test_scoped_contracts_falls_back_to_sweep_when_filter_ignored(adapter):
+    """probe totalCount가 크면(필터 무시) 전국 스윕으로 폴백한다."""
+    with patch.object(adapter, "_total_count", return_value=99999), \
+         patch.object(adapter, "_request", return_value=iter([])) as req:
+        list(adapter.fetch_contracts_scoped(
+            {"N1"}, date(2026, 6, 1), date(2026, 6, 30)))
+    # 폴백: 주 5개 스윕, bidNtceNo 없음
+    assert req.call_count == 5
+    for call in req.call_args_list:
+        assert "bidNtceNo" not in call.args[1]
+
+
+def test_scoped_empty_notice_set_fetches_nothing(adapter):
+    """대상 공고가 없으면 아무 요청도 하지 않는다."""
+    with patch.object(adapter, "_total_count") as probe, \
+         patch.object(adapter, "_request") as req:
+        result = list(adapter.fetch_contracts_scoped(
+            set(), date(2026, 6, 1), date(2026, 6, 30)))
+    assert result == []
+    probe.assert_not_called()
+    req.assert_not_called()
+
+
+def test_scoped_probe_none_falls_back(adapter):
+    """probe가 None(오류)이면 안전하게 전국 스윕으로 폴백한다."""
+    with patch.object(adapter, "_total_count", return_value=None), \
+         patch.object(adapter, "_request", return_value=iter([])) as req:
+        list(adapter.fetch_awards_scoped(
+            {"N1"}, date(2026, 6, 1), date(2026, 6, 7)))
+    assert req.call_count == 1  # 1주 스윕
+    assert "bidNtceNo" not in req.call_args_list[0].args[1]
+
+
+# ------------------------------------------------------------------ #
+# 계약 중심 모델 (체결일 기준 100억↑ 공사계약)                          #
+# ------------------------------------------------------------------ #
+
+def test_normalize_contract_rich(adapter):
+    raw = {
+        "bidNtceNo": "R25BK001", "cntrctNo": "C-1", "untyCntrctNo": "U-1",
+        "cntrctNm": "○○도로 확장공사", "bsnsDivNm": "공사",
+        "cntrctAmt": "25000000000", "ttalCntrctAmt": "26000000000",
+        "cntrctCnclsDate": "2026-06-02", "cntrctCnclsMthdNm": "제한경쟁",
+        "cntrctCnclsSttusNm": "계약완료", "lngtrmCtnuDivNm": "장기계속",
+        "dmndInsttNm": "한국도로공사", "cntrctInsttNm": "조달청",
+        "rprsntCorpNm": "대형건설", "rprsntCorpBizrno": "111-11-11111",
+        "cntrctPrd": "2026-06-02~2028-06-01",
+    }
+    c = adapter.normalize_contract(raw)
+    assert c["contract_price"] == 25_000_000_000
+    assert c["total_contract_price"] == 26_000_000_000
+    assert c["contracted_at"] == "2026-06-02"
+    assert c["bsns_div"] == "공사"
+    assert c["demand_inst"] == "한국도로공사"
+    assert c["contractor_name"] == "대형건설"
+    assert c["contractor_bizno"] == "111-11-11111"
+    assert c["is_long_term"] == "장기계속"
+
+
+def test_is_large_construction_contract(adapter):
+    big = {"bsnsDivNm": "공사", "cntrctAmt": "25000000000"}
+    small = {"bsnsDivNm": "공사", "cntrctAmt": "500000000"}
+    service = {"bsnsDivNm": "용역", "cntrctAmt": "30000000000"}
+    at_threshold = {"bsnsDivNm": "공사", "cntrctAmt": str(10_000_000_000)}
+    assert adapter.is_large_construction_contract(big) is True
+    assert adapter.is_large_construction_contract(small) is False
+    assert adapter.is_large_construction_contract(service) is False
+    assert adapter.is_large_construction_contract(at_threshold) is True

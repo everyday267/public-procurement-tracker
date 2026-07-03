@@ -24,3 +24,4 @@ jobs:
           done
         env:
           G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
+          LH_API_KEY: ${{ secrets.LH_API_KEY }}
