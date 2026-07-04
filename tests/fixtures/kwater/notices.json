@@ -13,7 +13,9 @@
         "tndrStat": "입찰완료",
         "tndrPartcptEntrpsCo": 1,
         "tndrPrqudoCo": 1,
-        "cntrctDivNm": "용역"
+        "cntrctDivNm": "용역",
+        "cntrctDeptNm": "충주권지사",
+        "tndrPblancEnddt": "202607101400"
       },
       {
         "tndrPblancDe": "20260615",
@@ -24,7 +26,9 @@
         "tndrPartcptEntrpsCo": 0,
         "tndrPrqudoCo": 0,
         "cntrctDivNm": "공사(종합)",
-        "presmtPc": "35000000000"
+        "cntrctDeptNm": "수도권본부",
+        "tndrPblancEnddt": "202606301400",
+        "rqestAmt": "35000000000"
       },
       {
         "tndrPblancDe": "20260620",
@@ -35,7 +39,9 @@
         "tndrPartcptEntrpsCo": 0,
         "tndrPrqudoCo": 0,
         "cntrctDivNm": "공사(전문)",
-        "presmtPc": "-"
+        "cntrctDeptNm": "낙동강유역본부",
+        "tndrPblancEnddt": "202607051400",
+        "rqestAmt": "-"
       }
     ]
   }

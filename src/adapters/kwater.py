@@ -10,10 +10,13 @@
            "totalCount"}, "list": [{tndrPblancDe, tndrPbanno, tndrPblancNm,
            ctrmthdCdNm, tndrStat, cntrctDivNm, ...}]}}
 
-확인된 필드: tndrPblancDe(공고일)·tndrPbanno(공고번호)·tndrPblancNm(공고명)·
-ctrmthdCdNm(계약방법)·tndrStat(진행상태)·cntrctDivNm(계약구분)·
-tndrPartcptEntrpsCo·tndrPrqudoCo. 캡처 샘플이 잘려 금액 필드는 미확정 —
-_PRICE_KEYS 후보로 방어 매핑하고 실서비스 스키마 로그로 확정한다.
+실서비스 스키마 (2026-07-04 run #20 [schema] 로그로 확정, 11개 필드):
+  cntrctDeptNm(계약부서)·cntrctDivNm(계약구분)·ctrmthdCdNm(계약방법)·
+  rqestAmt(요청금액)·tndrPartcptEntrpsCo·tndrPbanno(공고번호)·
+  tndrPblancDe(공고일)·tndrPblancEnddt(마감일시)·tndrPblancNm(공고명)·
+  tndrPrqudoCo·tndrStat(진행상태)
+※ rqestAmt의 추정가격/기초금액 여부·VAT 포함 여부는 실서비스 표본 대조로
+  확인 필요 (⚠️ 사용자, ebid.kwater.or.kr 화면 대조).
 
 낙찰·계약: 목록 XHR 미확보 → 빈 결과(ScraperBase 기본), G2B 보완.
 페이지네이션 파라미터(pageIndex/firstIndex/lastIndex)는 사이트 내 다른 API
@@ -33,9 +36,9 @@ LIST_OP = "/bidpblanc/bidpblancsttus/retrievePaginatedBidPblancList.do"
 PAGE_SIZE = 100
 _MAX_PAGES = 500
 
-# 금액 필드 후보 (실서비스 스키마 로그 확인 후 확정 — kepco 절차 준용)
-_PRICE_KEYS = ["presmtPc", "presmtPrc", "bdgtAmt", "asignBdgtAmt",
-               "tndrPblancAmt", "cntrctExpectAmt"]
+# 금액 필드 — rqestAmt(요청금액)로 확정 (run #20 실서비스 스키마).
+# 뒤 항목들은 스키마 변경 대비 폴백.
+_PRICE_KEYS = ["rqestAmt", "presmtPc", "presmtPrc", "bdgtAmt"]
 _VAT_KEYS = ["vatYn", "vatIncldYn"]
 
 # 장기계속 판별 대상 필드
@@ -110,7 +113,7 @@ class KWaterAdapter(ScraperBaseAdapter):
             "estimated_price":         estimated_price,
             "vat_included":            vat_included,
             "posted_at":               self._parse_dt(raw.get("tndrPblancDe")),
-            "bid_open_at":             self._parse_dt(raw.get("opengDt") or raw.get("opengDe")),
+            "bid_open_at":             self._parse_dt(raw.get("tndrPblancEnddt")),
             "status":                  self._clean(raw.get("tndrStat")) or "공고중",
             "raw_payload":             raw,
             "source_hash":             self._hash(raw),
