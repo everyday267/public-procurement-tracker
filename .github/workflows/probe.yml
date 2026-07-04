@@ -1,0 +1,32 @@
+name: probe-phase2
+# Phase 2 조사용 수동 워크플로 (실행계획 §3.1).
+# 개발 컨테이너에서 한국 공공기관 도메인이 차단되어, 네트워크가 열린
+# Actions 러너에서 OpenAPI 존재 여부·사이트 접근성을 조사하고
+# 응답 샘플을 아티팩트로 회수한다.
+
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: '실행할 조사 스크립트 (scripts/ 하위)'
+        required: false
+        default: 'probe_phase2.py'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
+      - name: 조사 실행
+        run: python scripts/${{ github.event.inputs.script || 'probe_phase2.py' }}
+      - name: 샘플 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-output-${{ github.run_number }}
+          path: probe_output/
+          retention-days: 30
