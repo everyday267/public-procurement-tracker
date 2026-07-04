@@ -151,8 +151,9 @@ class EXAdapter(ScraperBaseAdapter):
             "contract_method":  self._clean(raw.get("cmpttMthd")),
             "is_long_term":     "장기계속" if detect_long_term_from_raw(raw, _LT_KEYS) else None,
             "demand_inst":      "한국도로공사",
+            # 계약부서(cntrtDptnm)를 계약기관으로. 주관부서(sprvDptnm)는
+            # contracts 테이블에 컬럼이 없어 raw_payload로만 보존한다.
             "contract_inst":    self._clean(raw.get("cntrtDptnm")),
-            "supervising_dept": self._clean(raw.get("sprvDptnm")),
             "contractor_name":  self._clean(raw.get("cntrtCrprNm")),
             "contractor_bizno": self._clean(raw.get("crno")),
             "raw_payload":      raw,
