@@ -35,6 +35,11 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests
+      - name: Playwright 준비 (XHR 캡처 스크립트용)
+        if: contains(github.event.inputs.probe_script, 'xhr')
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
       - name: 조사 실행
         run: python scripts/${{ github.event.inputs.probe_script }}
       - name: 샘플 업로드
