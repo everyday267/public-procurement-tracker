@@ -78,6 +78,15 @@ jobs:
           LH_API_KEY: ${{ secrets.LH_API_KEY }}
           KEPCO_API_KEY: ${{ secrets.KEPCO_API_KEY }}
 
+      - name: 수집 결과 요약 (표본 대조용)
+        if: steps.guard.outputs.should_run == 'true'
+        run: |
+          for f in output/*_joined_*.csv output/*_contracts_*.csv; do
+            [ -f "$f" ] || continue
+            echo "===== $f ($(($(wc -l < "$f") - 1))행) ====="
+            head -21 "$f"
+          done
+
       - name: DB 업로드 (아티팩트)
         if: steps.guard.outputs.should_run == 'true'
         uses: actions/upload-artifact@v4
