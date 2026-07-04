@@ -75,7 +75,7 @@ python -m src.run_monthly --since 2026-06-01 --until 2026-06-07 --sources g2b_op
 ## 디렉토리
 ```
 src/
-  adapters/        사이트별 어댑터 (base, lh, g2b_opnstd, kr_rail, kepco)
+  adapters/        사이트별 어댑터 (base, scraper_base, lh, g2b_opnstd, kr_rail, kepco, kwater, ex, kogas)
   db.py            SQLite 스키마/연결
   normalizer.py
   long_term_detector.py
