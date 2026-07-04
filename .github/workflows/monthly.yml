@@ -110,6 +110,7 @@ jobs:
           G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
           LH_API_KEY: ${{ secrets.LH_API_KEY }}
           KEPCO_API_KEY: ${{ secrets.KEPCO_API_KEY }}
+          EX_API_KEY: ${{ secrets.EX_API_KEY }}
 
       - name: 수집 결과 요약 (표본 대조용)
         if: steps.guard.outputs.should_run == 'true'

@@ -23,7 +23,18 @@
   cntrctDivNm·tndrPartcptEntrpsCo·tndrPrqudoCo (+캡처 잘림, 금액 필드 미확정)
 - 잔여: 금액 필드명 확정(실서비스 [schema] 로그), 상세 XHR(추정가격 미노출 시)
 
-### EX (한국도로공사) — 🔶 포털 목록 XHR 확보, 전용 화면 XHR 미확보
+### EX (한국도로공사) — ✅ 계약 OpenAPI 확정, 어댑터 구현됨 (`ex.py`)
+
+**(2026-07-04 갱신)** 사용자가 EX 자체 공공데이터포털(data.ex.co.kr)에서
+**"전자조달 계약공개현황"** OpenAPI 활용신청 완료 (`EX_API_KEY`, 10자리):
+- `GET https://data.ex.co.kr/openapi/elctPrcmInfo/elctPrcmCntrtOppubPrss`
+- 파라미터: key·type(json/xml)·sCntrtCntgDates/eCntrtCntgDates(체결일 범위)·
+  pbanClssCd(CT=공사 등 13종)·pageNo/numOfRows
+- 출력: 공고번호·계약명·계약방법·계약업체명/사업자번호·계약금액·부서·체결일
+- **계약(체결일 기준) 데이터**라 fetch_contracts 경로로 구현 — 핵심 산출물
+  (100억↑ 공사계약 집계)에 직결. 입찰공고는 아래 포털 XHR로 후속 구현.
+
+#### 입찰공고 (포털 XHR — 후속 과제)
 
 - 비로그인 JSON 확인:
   - `POST https://ebid.ex.co.kr/ui/bp/portal/findPagingPortalBidNotiList.do`

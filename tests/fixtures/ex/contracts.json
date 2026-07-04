@@ -1,0 +1,48 @@
+{
+  "code": "SUCCESS",
+  "message": "인증키가 유효합니다.",
+  "count": 3,
+  "pageNo": 1,
+  "numOfRows": 100,
+  "list": [
+    {
+      "pbanClssCd": "CT",
+      "pbanClssNm": "공사",
+      "scbdPbanNo": "EX2026060001",
+      "cntrtNm": "○○고속도로 확장공사(제3공구) 장기계속 2차",
+      "cmpttMthd": "제한경쟁",
+      "crno": "123-45-67890",
+      "cntrtCrprNm": "대한건설(주)",
+      "cntrtAmt": "45000000000",
+      "cntrtDptnm": "계약처",
+      "sprvDptnm": "건설처",
+      "cntrtCntgDates": "20260615"
+    },
+    {
+      "pbanClssCd": "CT",
+      "pbanClssNm": "공사",
+      "scbdPbanNo": "EX2026060002",
+      "cntrtNm": "△△영업소 포장보수공사",
+      "cmpttMthd": "일반경쟁",
+      "crno": "234-56-78901",
+      "cntrtCrprNm": "한국포장(주)",
+      "cntrtAmt": "3200000000",
+      "cntrtDptnm": "계약처",
+      "sprvDptnm": "도로처",
+      "cntrtCntgDates": "20260620"
+    },
+    {
+      "pbanClssCd": "SV",
+      "pbanClssNm": "용역",
+      "scbdPbanNo": "EX2026060003",
+      "cntrtNm": "고속도로 교통량 조사 용역",
+      "cmpttMthd": "수의계약",
+      "crno": "345-67-89012",
+      "cntrtCrprNm": "교통연구원(주)",
+      "cntrtAmt": "15000000000",
+      "cntrtDptnm": "계약처",
+      "sprvDptnm": "교통처",
+      "cntrtCntgDates": "20260625"
+    }
+  ]
+}

@@ -67,6 +67,7 @@ python -m src.run_monthly --since 2026-06-01 --until 2026-06-07 --sources g2b_op
 | `G2B_API_KEY` | 나라장터 + 국가철도공단(나라장터 경유) |
 | `LH_API_KEY` | LH e-Bid 자체 OpenAPI |
 | `KEPCO_API_KEY` | 한전 전자입찰계약정보 OpenAPI (공공데이터포털 발급) |
+| `EX_API_KEY` | 한국도로공사 전자조달 계약공개현황 OpenAPI (data.ex.co.kr 발급) |
 
 시크릿이 Settings → Secrets and variables → Actions에 등록되어 있어야
 `monthly-collect` / `quarterly-backfill` 워크플로우가 정상 동작합니다.

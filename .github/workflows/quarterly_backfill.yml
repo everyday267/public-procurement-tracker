@@ -26,3 +26,4 @@ jobs:
           G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
           LH_API_KEY: ${{ secrets.LH_API_KEY }}
           KEPCO_API_KEY: ${{ secrets.KEPCO_API_KEY }}
+          EX_API_KEY: ${{ secrets.EX_API_KEY }}
