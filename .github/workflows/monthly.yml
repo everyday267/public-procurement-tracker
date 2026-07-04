@@ -19,9 +19,34 @@ on:
       sources:
         description: '수집 소스 (쉼표구분, 예: g2b_opnstd 또는 lh,kr_rail). 비우면 전체'
         required: false
+      probe_script:
+        description: '설정 시 수집 대신 조사 스크립트 실행 (scripts/ 하위 파일명, 예: probe_phase2.py)'
+        required: false
 
 jobs:
+  # Phase 2 조사 모드 (실행계획 §3.1): 개발 컨테이너의 네트워크 차단을 우회해
+  # 러너에서 OpenAPI 존재 여부·사이트 접근성을 조사하고 샘플을 아티팩트로 회수.
+  probe:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.probe_script != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
+      - name: 조사 실행
+        run: python scripts/${{ github.event.inputs.probe_script }}
+      - name: 샘플 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-output-${{ github.run_number }}
+          path: probe_output/
+          retention-days: 30
+
   collect:
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.probe_script == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
