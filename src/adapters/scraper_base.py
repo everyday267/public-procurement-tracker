@@ -20,7 +20,7 @@ from typing import Iterable, Iterator, Optional
 import requests
 
 from .base import BaseProcurementAdapter
-from ..http_client import get_with_retry
+from ..http_client import get_with_retry, post_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +73,20 @@ class ScraperBaseAdapter(BaseProcurementAdapter):
                  headers: Optional[dict] = None) -> str:
         """HTML 등 텍스트 응답."""
         return self._get(url, params, headers).text
+
+    def post_json(self, url: str, json_body: dict,
+                  headers: Optional[dict] = None):
+        """XHR POST(JSON body) → JSON 응답. 비JSON이면 RuntimeError."""
+        r = post_with_retry(
+            url, json_body=json_body, timeout=self.timeout, session=self.session,
+            headers=self._headers(headers), max_retries=MAX_RETRIES,
+            sleep_before=self.request_interval, label=self.source,
+        )
+        try:
+            return r.json()
+        except ValueError:
+            raise RuntimeError(
+                f"[{self.source}] 비JSON 응답 (차단 또는 개편 의심): {r.text[:200]}")
 
     # ── fetch 골격 ────────────────────────────────────────────────────────
 

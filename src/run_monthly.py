@@ -20,6 +20,7 @@ from src.adapters.lh import LHAdapter
 from src.adapters.g2b_opnstd import G2BOpnStdAdapter
 from src.adapters.kr_rail import KRRailAdapter
 from src.adapters.kepco import KEPCOAdapter
+from src.adapters.kwater import KWaterAdapter
 from src.db import (
     get_connection,
     ensure_schema,
@@ -41,10 +42,11 @@ SOURCES: Dict[str, Callable] = {
     "g2b_opnstd": lambda: G2BOpnStdAdapter(),  # G2B_API_KEY
     "kr_rail":   lambda: KRRailAdapter(),    # G2B_API_KEY 공유
     "kepco":     lambda: KEPCOAdapter(),     # KEPCO_API_KEY
+    "kwater":    lambda: KWaterAdapter(),    # 키 불필요 (비로그인 XHR)
 }
 
-# 자체 OpenAPI로 기관 범위가 이미 한정된 소스 (fetch→process를 소스별 독립 실행)
-SELF_SCOPED = ["lh", "kepco"]
+# 자체 시스템으로 기관 범위가 이미 한정된 소스 (fetch→process를 소스별 독립 실행)
+SELF_SCOPED = ["lh", "kepco", "kwater"]
 
 NOTICE_COLS = [
     "notice_no", "title", "construction_type", "bid_method",

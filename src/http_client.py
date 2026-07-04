@@ -28,6 +28,25 @@ def get_with_retry(url, params, timeout=30, session=None, headers=None,
     max_retries 회 모두 실패하면 마지막 예외를 다시 올린다.
     ConnectionError/Timeout/5xx만 재시도하며, 그 외 HTTP 오류(4xx)는 즉시 올린다.
     """
+    return _request_with_retry("GET", url, params=params, timeout=timeout,
+                               session=session, headers=headers,
+                               max_retries=max_retries, backoff_base=backoff_base,
+                               sleep_before=sleep_before, label=label)
+
+
+def post_with_retry(url, json_body=None, data=None, timeout=30, session=None,
+                    headers=None, max_retries=4, backoff_base=2.0,
+                    sleep_before=0.0, label=""):
+    """POST 요청 + 재시도 (XHR JSON API용). 재시도 정책은 GET과 동일."""
+    return _request_with_retry("POST", url, json_body=json_body, data=data,
+                               timeout=timeout, session=session, headers=headers,
+                               max_retries=max_retries, backoff_base=backoff_base,
+                               sleep_before=sleep_before, label=label)
+
+
+def _request_with_retry(method, url, params=None, json_body=None, data=None,
+                        timeout=30, session=None, headers=None,
+                        max_retries=4, backoff_base=2.0, sleep_before=0.0, label=""):
     sess = session or requests
     hdrs = {**DEFAULT_HEADERS, **(headers or {})}
     last_exc = None
@@ -36,7 +55,12 @@ def get_with_retry(url, params, timeout=30, session=None, headers=None,
         if sleep_before:
             time.sleep(sleep_before)
         try:
-            resp = sess.get(url, params=params, timeout=timeout, headers=hdrs)
+            # sess.get/post로 디스패치 (requests 모듈·Session 양쪽 지원)
+            if method == "GET":
+                resp = sess.get(url, params=params, timeout=timeout, headers=hdrs)
+            else:
+                resp = sess.post(url, params=params, json=json_body, data=data,
+                                 timeout=timeout, headers=hdrs)
             if resp.status_code in RETRYABLE_STATUS:
                 raise requests.HTTPError(
                     "{} Server Error (retryable)".format(resp.status_code), response=resp

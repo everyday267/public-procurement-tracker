@@ -1,0 +1,42 @@
+{
+  "message": {"code": "success", "code_name": "서비스 처리에 성공했습니다."},
+  "data": {
+    "pagination": {"firstIndex": 1, "recordCountPerPage": 100, "pageIndex": 1,
+                   "pageSize": 1, "lastIndex": 100, "totalCount": 3},
+    "count": 3,
+    "list": [
+      {
+        "tndrPblancDe": "20260703",
+        "tndrPbanno": "B5202602375",
+        "tndrPblancNm": "2026년 충주댐지사 정보통신설비 유지보수관리 용역",
+        "ctrmthdCdNm": "수의계약(시담)",
+        "tndrStat": "입찰완료",
+        "tndrPartcptEntrpsCo": 1,
+        "tndrPrqudoCo": 1,
+        "cntrctDivNm": "용역"
+      },
+      {
+        "tndrPblancDe": "20260615",
+        "tndrPbanno": "B5202602100",
+        "tndrPblancNm": "○○댐 치수능력 증대 건설공사(장기계속 1차)",
+        "ctrmthdCdNm": "일반경쟁",
+        "tndrStat": "공고중",
+        "tndrPartcptEntrpsCo": 0,
+        "tndrPrqudoCo": 0,
+        "cntrctDivNm": "공사(종합)",
+        "presmtPc": "35000000000"
+      },
+      {
+        "tndrPblancDe": "20260620",
+        "tndrPbanno": "B5202602200",
+        "tndrPblancNm": "△△정수장 여과지 개량공사",
+        "ctrmthdCdNm": "제한경쟁",
+        "tndrStat": "공고중",
+        "tndrPartcptEntrpsCo": 0,
+        "tndrPrqudoCo": 0,
+        "cntrctDivNm": "공사(전문)",
+        "presmtPc": "-"
+      }
+    ]
+  }
+}
