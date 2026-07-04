@@ -49,14 +49,16 @@
   `ui/sp/expro/bidnoti/em-sp-bid-noti-cs.html`)의 검색 XHR(기간·페이징 파라미터)
   캡처, 금액 필드 위치 확인 → 어댑터 구현
 
-### KHNP (한국수력원자력) — 🔶 메뉴/공지 API까지 확인 (Wave A 유일 잔여)
+### KHNP (한국수력원자력) — ⏸ 보류 (2026-07-04 사용자 결정으로 스킵)
 
 - `ebiz.khnp.co.kr` → `/login.do` 리다이렉트되나 NoSession 계열 API 다수 존재
   (`findListMenu.do`, `totalFindListByNoSession.do` 등)
 - 계약정보공개 메뉴 코드 확인: `CNTIO` (attr_03=EBIZ13100, attr_02=TPRO13001)
-- **(2026-07-04 갱신)** requests 직접 호출 시 `findListMenu.do` 등이 403
-  (브라우저 컨텍스트에서만 200 — CSRF/헤더 보호). Playwright 세션 기반
-  재조사 필요. PRD §8 예상대로 난이도 최상 — Wave A 유일 잔여 과제.
+- requests 직접 호출 시 `findListMenu.do` 등이 403 (브라우저 컨텍스트에서만
+  200 — CSRF/헤더 보호). PRD §8 예상대로 난이도 최상.
+- **보류 결정**: Wave A는 KWATER·EX·KOGAS 3개로 마감하고 Wave B(발전 5사)를
+  선행한다. KHNP 재개 시 Playwright 세션 기반 캡처 또는 data.go.kr OpenAPI
+  확인(국내 IP)부터 시작.
 
 ### KOGAS (한국가스공사) — ✅ 스크래핑 구조 확정, 어댑터 구현됨 (`kogas.py`)
 
@@ -77,7 +79,7 @@
 1. ~~kwater 실서비스 검증 → 금액 필드 확정~~ ✅ (rqestAmt, run #20/#21)
 2. ~~EX 계약 OpenAPI 어댑터~~ ✅ (run #23/#24) — 입찰공고 포털 XHR은 후속
 3. ~~KOGAS 목록/상세 스크래핑 어댑터~~ ✅ (run #25~#29)
-4. KHNP: Playwright 세션 기반 재조사 → XHR 캡처 → `khnp.py` (Wave A 잔여)
+4. ~~KHNP~~ ⏸ 보류 (사용자 결정) → Wave B(발전 5사, kepco_family.py) 선행
 5. ⚠️**[사용자]**: data.go.kr에서 KHNP 등 입찰정보 OpenAPI 존재 여부 확인
    (있으면 XHR 대신 OpenAPI 우선 원칙), 각 스크래핑 사이트(kwater·kogas)
    이용약관·robots.txt 자동수집 조항 확인, 표본 대조

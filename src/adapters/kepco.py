@@ -142,13 +142,15 @@ class KEPCOAdapter(BaseProcurementAdapter):
 
     def normalize(self, raw: dict) -> dict:
         notice_no = self._clean(raw.get("no"))
-        # 차수 필드가 없으므로 1 고정 (notice_id = kepco:{공고번호}:{차수})
+        # 차수 필드가 없으므로 1 고정 (notice_id = {source}:{공고번호}:{차수}).
+        # source/agency_code는 클래스 속성 기준 — 발전 자회사 서브클래스
+        # (kepco_family.py)가 companyId만 바꿔 그대로 재사용한다.
         return {
-            "notice_id":               f"kepco:{notice_no}:1",
+            "notice_id":               f"{self.source}:{notice_no}:1",
             "source":                  self.source,
             "notice_no":               notice_no,
             "notice_rev":              1,
-            "agency_code":             "KEPCO",
+            "agency_code":             self.agency_codes[0],
             "title":                   self._clean(raw.get("name")),
             "work_type":               self._work_type(raw),
             "construction_type":       self._construction_type(raw),
