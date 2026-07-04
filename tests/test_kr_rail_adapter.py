@@ -16,27 +16,35 @@ def adapter():
 
 
 KR_ROW = {"bidNtceNo": "K1", "bidNtceOrd": "0", "bidNtceNm": "철도 노반신설 기타공사",
-          "bsnsDivNm": "공사", "presmptPrce": "30000000000", "dminsttNm": "국가철도공단"}
+          "bsnsDivNm": "공사", "presmptPrce": "30000000000", "dmndInsttNm": "국가철도공단"}
 OTHER_ROW = {"bidNtceNo": "G1", "bidNtceOrd": "0", "bidNtceNm": "도로 확장공사",
-             "bsnsDivNm": "공사", "presmptPrce": "20000000000", "dminsttNm": "서울특별시"}
+             "bsnsDivNm": "공사", "presmptPrce": "20000000000", "dmndInsttNm": "서울특별시"}
 
 
 # ------------------------------------------------------------------ #
 # _is_kr_rail 필터                                                     #
 # ------------------------------------------------------------------ #
 
-def test_is_kr_rail_by_dminstt_name(adapter):
+def test_is_kr_rail_by_dmnd_instt_name(adapter):
+    """실서비스 개방표준 필드명(dmndInsttNm) 기준 — 2026-07 검증에서 확정."""
     assert adapter._is_kr_rail(KR_ROW) is True
     assert adapter._is_kr_rail(OTHER_ROW) is False
 
 
-def test_is_kr_rail_by_inst_name(adapter):
+def test_is_kr_rail_by_ntce_instt_name(adapter):
+    assert adapter._is_kr_rail({"ntceInsttNm": "국가철도공단"}) is True
+
+
+def test_is_kr_rail_legacy_field_names(adapter):
+    """구 표기(instNm/dminsttNm)도 하위 호환으로 매칭돼야 함."""
     assert adapter._is_kr_rail({"instNm": "국가철도공단 수도권본부"}) is True
+    assert adapter._is_kr_rail({"dminsttNm": "국가철도공단"}) is True
 
 
 def test_is_kr_rail_by_inst_code(adapter):
+    assert adapter._is_kr_rail({"dmndInsttCd": KR_INST_CODE}) is True
+    assert adapter._is_kr_rail({"ntceInsttCd": KR_INST_CODE}) is True
     assert adapter._is_kr_rail({"instCd": KR_INST_CODE}) is True
-    assert adapter._is_kr_rail({"dminsttCd": KR_INST_CODE}) is True
 
 
 def test_is_kr_rail_empty_row(adapter):
