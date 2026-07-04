@@ -21,6 +21,8 @@ from src.adapters.g2b_opnstd import G2BOpnStdAdapter
 from src.adapters.kr_rail import KRRailAdapter
 from src.adapters.kepco import KEPCOAdapter
 from src.adapters.kwater import KWaterAdapter
+from src.adapters.ex import EXAdapter
+from src.adapters.kogas import KOGASAdapter
 from src.db import (
     get_connection,
     ensure_schema,
@@ -43,10 +45,12 @@ SOURCES: Dict[str, Callable] = {
     "kr_rail":   lambda: KRRailAdapter(),    # G2B_API_KEY 공유
     "kepco":     lambda: KEPCOAdapter(),     # KEPCO_API_KEY
     "kwater":    lambda: KWaterAdapter(),    # 키 불필요 (비로그인 XHR)
+    "ex":        lambda: EXAdapter(),        # EX_API_KEY (data.ex.co.kr, 계약 중심)
+    "kogas":     lambda: KOGASAdapter(),     # 키 불필요 (비로그인 스크래핑)
 }
 
 # 자체 시스템으로 기관 범위가 이미 한정된 소스 (fetch→process를 소스별 독립 실행)
-SELF_SCOPED = ["lh", "kepco", "kwater"]
+SELF_SCOPED = ["lh", "kepco", "kwater", "ex", "kogas"]
 
 NOTICE_COLS = [
     "notice_no", "title", "construction_type", "bid_method",

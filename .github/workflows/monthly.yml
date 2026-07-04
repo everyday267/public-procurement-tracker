@@ -42,6 +42,9 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: 조사 실행
         run: python scripts/${{ github.event.inputs.probe_script }}
+        env:
+          EX_API_KEY: ${{ secrets.EX_API_KEY }}
+          DATA_EX_API_KEY: ${{ secrets.DATA_EX_API_KEY }}
       - name: 샘플 업로드
         if: always()
         uses: actions/upload-artifact@v4
@@ -107,6 +110,7 @@ jobs:
           G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
           LH_API_KEY: ${{ secrets.LH_API_KEY }}
           KEPCO_API_KEY: ${{ secrets.KEPCO_API_KEY }}
+          EX_API_KEY: ${{ secrets.EX_API_KEY }}
 
       - name: 수집 결과 요약 (표본 대조용)
         if: steps.guard.outputs.should_run == 'true'

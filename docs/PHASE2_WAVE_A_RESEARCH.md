@@ -23,7 +23,22 @@
   cntrctDivNm·tndrPartcptEntrpsCo·tndrPrqudoCo (+캡처 잘림, 금액 필드 미확정)
 - 잔여: 금액 필드명 확정(실서비스 [schema] 로그), 상세 XHR(추정가격 미노출 시)
 
-### EX (한국도로공사) — 🔶 포털 목록 XHR 확보, 전용 화면 XHR 미확보
+### EX (한국도로공사) — ✅ 계약 OpenAPI 확정, 어댑터 구현됨 (`ex.py`)
+
+**(2026-07-04 갱신)** 사용자가 EX 자체 공공데이터포털(data.ex.co.kr)에서
+**"전자조달 계약공개현황"** OpenAPI 활용신청 완료 (`EX_API_KEY`, 10자리):
+- `GET https://data.ex.co.kr/openapi/elctPrcmInfo/elctPrcmCntrtOppubPrss`
+- 파라미터: key·type(json/xml)·sCntrtCntgDates/eCntrtCntgDates(체결일 범위)·
+  pbanClssCd(CT=공사 등 13종)·pageNo/numOfRows
+- 출력: 공고번호·계약명·계약방법·계약업체명/사업자번호·계약금액·부서·체결일
+- **계약(체결일 기준) 데이터**라 fetch_contracts 경로로 구현 — 핵심 산출물
+  (100억↑ 공사계약 집계)에 직결. 입찰공고는 아래 포털 XHR로 후속 구현.
+- **실서비스 검증 완료** (run #24, 2026-06): 계약 620건 수집 →
+  100억↑ 공사계약 5건 적재 (제천~영월 고속국도 1~5공구, 합계 약 1.2조원).
+  실스키마 = 문서 + dateGubun. 관찰: 계약명 "(제N차)" 표기가 장기계속
+  감지 패턴에 안 걸림 — 차수 표기 오탐 위험 검토 후 패턴 확장 여부 결정.
+
+#### 입찰공고 (포털 XHR — 후속 과제)
 
 - 비로그인 JSON 확인:
   - `POST https://ebid.ex.co.kr/ui/bp/portal/findPagingPortalBidNotiList.do`
@@ -34,27 +49,36 @@
   `ui/sp/expro/bidnoti/em-sp-bid-noti-cs.html`)의 검색 XHR(기간·페이징 파라미터)
   캡처, 금액 필드 위치 확인 → 어댑터 구현
 
-### KHNP (한국수력원자력) — 🔶 메뉴/공지 API까지 확인
+### KHNP (한국수력원자력) — 🔶 메뉴/공지 API까지 확인 (Wave A 유일 잔여)
 
 - `ebiz.khnp.co.kr` → `/login.do` 리다이렉트되나 NoSession 계열 API 다수 존재
   (`findListMenu.do`, `totalFindListByNoSession.do` 등)
 - 계약정보공개 메뉴 코드 확인: `CNTIO` (attr_03=EBIZ13100, attr_02=TPRO13001)
-- 잔여: 입찰공고 목록 화면 진입 경로 확보(메뉴 URL 직접 탐색) 후 XHR 캡처.
-  PRD §8 예상대로 보안이 강해 Wave A 중 난이도 최상.
+- **(2026-07-04 갱신)** requests 직접 호출 시 `findListMenu.do` 등이 403
+  (브라우저 컨텍스트에서만 200 — CSRF/헤더 보호). Playwright 세션 기반
+  재조사 필요. PRD §8 예상대로 난이도 최상 — Wave A 유일 잔여 과제.
 
-### KOGAS (한국가스공사) — 🔶 구형 JSP 프레임, 추가 조사 필요
+### KOGAS (한국가스공사) — ✅ 스크래핑 구조 확정, 어댑터 구현됨 (`kogas.py`)
 
 - `bid.kogas.or.kr`(443) 해외 차단, **`bid.kogas.or.kr:9443`은 접속 가능**
   (구형 프레임 사이트, `/supplier/index.jsp`)
 - `www.kogas.or.kr/site/koGas/referenceBidList.do`(참고용 입찰공고)는 직접
   접근 시 244바이트 셸만 반환 — 세션/리퍼러 필요 추정
-- 잔여: 9443 프레임 내부(buyer/supplier) 공고 목록 JSP 경로 추적
+- **(2026-07-04 갱신, 5~8차 조사)** 비로그인 경로 확정:
+  - 목록: `GET /supplier/contents/bid/bid_list_notice_frm.jsp?page&worktype=C`
+    (euc-kr, 15행/페이지, Total Records 표기, 공고번호 앞 8자리=공고일)
+  - 상세: `POST /supplier/contents/bid/bid_detail_view_notice.jsp` —
+    추정가격(부가세 별도)·공고일시·마감/개찰일시
+  - **실서비스 검증 완료** (run #29, 2026-06): 공사 45건 중 6월 17건 수집,
+    17건 전부 추정가격 파싱 성공(미공개 0), 100억↑ 0건(표본 대조 필요)
 
 ## 다음 단계 (우선순위)
 
-1. kwater 실서비스 검증 → 금액 필드 확정 → 매핑 마감
-2. EX 전용 공고검색 화면 XHR 캡처(probe 스크립트에 화면 URL 직접 로드 추가) → `ex.py`
-3. KOGAS 9443 프레임 크롤 → 목록 JSP 확인 → `kogas.py`
-4. KHNP 메뉴 URL 기반 진입 → XHR 캡처 → `khnp.py`
-5. ⚠️**[사용자]**: data.go.kr에서 4개 기관 입찰정보 OpenAPI 존재 여부 확인
-   (있으면 XHR 대신 OpenAPI 우선 원칙 적용), 각 사이트 이용약관·robots.txt 확인
+1. ~~kwater 실서비스 검증 → 금액 필드 확정~~ ✅ (rqestAmt, run #20/#21)
+2. ~~EX 계약 OpenAPI 어댑터~~ ✅ (run #23/#24) — 입찰공고 포털 XHR은 후속
+3. ~~KOGAS 목록/상세 스크래핑 어댑터~~ ✅ (run #25~#29)
+4. KHNP: Playwright 세션 기반 재조사 → XHR 캡처 → `khnp.py` (Wave A 잔여)
+5. ⚠️**[사용자]**: data.go.kr에서 KHNP 등 입찰정보 OpenAPI 존재 여부 확인
+   (있으면 XHR 대신 OpenAPI 우선 원칙), 각 스크래핑 사이트(kwater·kogas)
+   이용약관·robots.txt 자동수집 조항 확인, 표본 대조
+   (KWATER rqestAmt 의미, KOGAS 6월 100억↑ 부재, EX 제천~영월 5건)
