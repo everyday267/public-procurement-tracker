@@ -60,10 +60,17 @@ class KRRailAdapter(G2BOpnStdAdapter):
                 yield row
 
     def _is_kr_rail(self, row: dict) -> bool:
-        """기관명 또는 기관코드로 국가철도공단 여부 확인."""
-        inst_nm = row.get("instNm", "") or row.get("dminsttNm", "")
-        inst_cd = row.get("instCd", "") or row.get("dminsttCd", "")
-        return KR_INST_NAME in inst_nm or inst_cd == KR_INST_CODE
+        """기관명 또는 기관코드로 국가철도공단 여부 확인.
+
+        개방표준 API 실서비스 필드는 dmndInsttNm(수요기관)·ntceInsttNm(공고기관).
+        (2026-07 실서비스 검증에서 확인 — 기존 dminsttNm 표기는 오타로 미매칭)
+        """
+        names = (row.get("dmndInsttNm"), row.get("ntceInsttNm"),
+                 row.get("instNm"), row.get("dminsttNm"))
+        codes = (row.get("dmndInsttCd"), row.get("ntceInsttCd"),
+                 row.get("instCd"), row.get("dminsttCd"))
+        return (any(KR_INST_NAME in n for n in names if n)
+                or any(c == KR_INST_CODE for c in codes if c))
 
     def normalize(self, raw: dict) -> dict:
         """G2B 정규화 결과에 source를 kr_rail로 덮어쓴다."""

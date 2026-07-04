@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- LH e-Bid OpenContractInfoList 필드명 기반 합성 샘플 -->
+<response>
+  <header>
+    <resultCode>00</resultCode>
+    <resultMsg>NORMAL SERVICE.</resultMsg>
+  </header>
+  <body>
+    <items>
+      <item>
+        <bidNum>2026-LH-0001</bidNum>
+        <ctrctNm>○○지구 아파트 건설공사 1공구</ctrctNm>
+        <ctrctAmt>11500000000</ctrctAmt>
+        <ctrctCntrctgDt>2026-07-01</ctrctCntrctgDt>
+        <tndrCtrctMedNm>장기계속</tndrCtrctMedNm>
+        <ctrctVndrNm>한국건설(주)</ctrctVndrNm>
+        <ctrctVndrTypeNm>대표사</ctrctVndrTypeNm>
+        <initBgnwrkDt>2026-07-15</initBgnwrkDt>
+        <finlCompwrkDt>2029-07-14</finlCompwrkDt>
+      </item>
+    </items>
+    <numOfRows>1</numOfRows>
+    <pageNo>1</pageNo>
+    <totalCount>1</totalCount>
+  </body>
+</response>

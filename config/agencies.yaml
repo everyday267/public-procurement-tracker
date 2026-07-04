@@ -1,21 +1,11 @@
+# PRD v1.4 §2 기준 16개 기관 (2024년 조달청 시설공사 발주계획 분석자료 순).
+# source_type: A = 나라장터(G2B) 경유 수집, C = 자체 조달시스템(어댑터/스크래핑)
 agencies:
   # Phase 1 — MVP
   - agency_code: G2B
     agency_name: 대한민국 정부조달청 (나라장터)
     source_type: A
-    self_system_url: https://apis.data.go.kr/1230000/ad/BidPublicInfoService
-    phase: 1
-
-  - agency_code: LH
-    agency_name: 한국토지주택공사
-    source_type: C
-    self_system_url: https://ebid.lh.or.kr
-    phase: 1
-
-  - agency_code: KEPCO
-    agency_name: 한국전력공사
-    source_type: C
-    self_system_url: https://srm.kepco.net
+    self_system_url: https://apis.data.go.kr/1230000/ao/PubDataOpnStdService
     phase: 1
 
   - agency_code: KR_RAIL
@@ -24,12 +14,20 @@ agencies:
     self_system_url: https://ebid.kr.or.kr
     phase: 1
 
-  # Phase 2 — 대형 SOC·발전
-  - agency_code: KHNP
-    agency_name: 한국수력원자력
+  - agency_code: KEPCO
+    agency_name: 한국전력공사
     source_type: C
-    phase: 2
+    # 수집 경로: 한전 빅데이터플랫폼 OpenAPI(bigdata.kepco.co.kr electContract.do), srm은 폴백
+    self_system_url: https://srm.kepco.net
+    phase: 1
 
+  - agency_code: LH
+    agency_name: 한국토지주택공사
+    source_type: C
+    self_system_url: https://ebid.lh.or.kr
+    phase: 1
+
+  # Phase 2 — 대형 SOC·발전 9개 기관
   - agency_code: EX
     agency_name: 한국도로공사
     source_type: C
@@ -37,6 +35,16 @@ agencies:
 
   - agency_code: KWATER
     agency_name: 한국수자원공사
+    source_type: C
+    phase: 2
+
+  - agency_code: KOGAS
+    agency_name: 한국가스공사
+    source_type: C
+    phase: 2
+
+  - agency_code: KHNP
+    agency_name: 한국수력원자력
     source_type: C
     phase: 2
 
@@ -50,28 +58,34 @@ agencies:
     source_type: C
     phase: 2
 
-  # Phase 3 — 도시·항만·공항·에너지·환경
+  - agency_code: KOSPO
+    agency_name: 한국남부발전
+    source_type: C
+    phase: 2
+
+  - agency_code: KOEN
+    agency_name: 한국남동발전
+    source_type: C
+    phase: 2
+
+  - agency_code: KOWEPO
+    agency_name: 한국서부발전
+    source_type: C
+    phase: 2
+
+  # Phase 3 — 도시·환경
   - agency_code: SH
     agency_name: 서울주택도시공사
     source_type: C
     phase: 3
 
-  - agency_code: BPA
-    agency_name: 부산항만공사
-    source_type: C
-    phase: 3
-
-  - agency_code: IIAC
-    agency_name: 인천국제공항공사
-    source_type: C
-    phase: 3
-
-  - agency_code: KOGAS
-    agency_name: 한국가스공사
+  - agency_code: GH
+    agency_name: 경기주택도시공사
     source_type: C
     phase: 3
 
   - agency_code: KECO
     agency_name: 한국환경공단
-    source_type: C
+    # G2B 이용 기관 — 별도 어댑터 없이 G2B 수집분 커버리지 검증만 수행 (실행계획 §4)
+    source_type: A
     phase: 3

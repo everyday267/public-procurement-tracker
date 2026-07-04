@@ -1,4 +1,4 @@
-"""run_monthly.py — 월간 수집 (LH·G2B·KR Rail) + notice_no 조인 + CSV 저장
+"""run_monthly.py — 월간 수집 (LH·G2B·KR Rail·KEPCO) + notice_no 조인 + CSV 저장
 
 사용법:
     python -m src.run_monthly --month 2026-05
@@ -19,6 +19,8 @@ from src.adapters.base import CONSTRUCTION_MIN_PRICE
 from src.adapters.lh import LHAdapter
 from src.adapters.g2b_opnstd import G2BOpnStdAdapter
 from src.adapters.kr_rail import KRRailAdapter
+from src.adapters.kepco import KEPCOAdapter
+from src.adapters.kwater import KWaterAdapter
 from src.db import (
     get_connection,
     ensure_schema,
@@ -35,12 +37,16 @@ logging.basicConfig(
 logger = logging.getLogger("run_monthly")
 
 # 어댑터별 API 키 환경변수는 각 어댑터가 생성 시점에 직접 읽는다.
-# KEPCO는 자체 어댑터가 아직 없어 Phase 1 목록에서 제외되어 있다 (README 참고).
 SOURCES: Dict[str, Callable] = {
-    "lh":        lambda: LHAdapter(),
-    "g2b_opnstd": lambda: G2BOpnStdAdapter(),
-    "kr_rail":   lambda: KRRailAdapter(),
+    "lh":        lambda: LHAdapter(),        # LH_API_KEY
+    "g2b_opnstd": lambda: G2BOpnStdAdapter(),  # G2B_API_KEY
+    "kr_rail":   lambda: KRRailAdapter(),    # G2B_API_KEY 공유
+    "kepco":     lambda: KEPCOAdapter(),     # KEPCO_API_KEY
+    "kwater":    lambda: KWaterAdapter(),    # 키 불필요 (비로그인 XHR)
 }
+
+# 자체 시스템으로 기관 범위가 이미 한정된 소스 (fetch→process를 소스별 독립 실행)
+SELF_SCOPED = ["lh", "kepco", "kwater"]
 
 NOTICE_COLS = [
     "notice_no", "title", "construction_type", "bid_method",
@@ -290,21 +296,26 @@ def run(month: Optional[str] = None, db_path: str = "procurement.db", output_dir
     all_joined = []
     any_success = False
 
-    # ── LH: 자체 OpenAPI (LH로 이미 범위 한정됨) ────────────────────────────
-    if "lh" in active:
-        logger.info("=== [lh] 수집 시작 | %s ~ %s ===", start, end)
+    # ── 자체 OpenAPI 소스 (LH·KEPCO: 기관 범위가 이미 한정됨) ────────────────
+    for source in [s for s in SELF_SCOPED if s in active]:
+        logger.info("=== [%s] 수집 시작 | %s ~ %s ===", source, start, end)
         started_at = datetime.now().isoformat()
         try:
-            adapter = SOURCES["lh"]()
+            adapter = SOURCES[source]()
+        except ValueError as e:
+            # API 키 미설정 소스는 경고 후 skip (부분 운영 허용, 실행계획 §2.3)
+            logger.warning("[%s] 어댑터 생성 실패 — skip: %s", source, e)
+            continue
+        try:
             rn, ra, rc = _fetch_all(adapter, start, end)
-            _log_schema("LH 공고", rn)
-            _log_schema("LH 개찰", ra)
-            _log_schema("LH 계약", rc)
-            if _process_source(conn, "lh", adapter, rn, ra, rc, label, output_dir, all_joined):
+            _log_schema(f"{source} 공고", rn)
+            _log_schema(f"{source} 개찰", ra)
+            _log_schema(f"{source} 계약", rc)
+            if _process_source(conn, source, adapter, rn, ra, rc, label, output_dir, all_joined):
                 any_success = True
         except Exception as e:
-            logger.exception("[lh] 수집 실패")
-            _record_fetch_error(conn, "lh", started_at, e)
+            logger.exception("[%s] 수집 실패", source)
+            _record_fetch_error(conn, source, started_at, e)
 
     # ── G2B 계열: 나라장터 개방표준 API를 1회만 fetch하여 공유 ──────────────
     #    g2b_opnstd = 전국 전체, kr_rail = 그중 국가철도공단분.
