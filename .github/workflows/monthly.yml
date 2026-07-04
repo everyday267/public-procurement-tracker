@@ -42,6 +42,9 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: 조사 실행
         run: python scripts/${{ github.event.inputs.probe_script }}
+        env:
+          EX_API_KEY: ${{ secrets.EX_API_KEY }}
+          DATA_EX_API_KEY: ${{ secrets.DATA_EX_API_KEY }}
       - name: 샘플 업로드
         if: always()
         uses: actions/upload-artifact@v4
