@@ -34,8 +34,12 @@ from ..long_term_detector import detect_long_term_from_raw
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://bigdata.kepco.co.kr/openapi/v1/electContract.do"
-REQUEST_INTERVAL = 1.0   # 초당 최대 1 req (실행계획 §2.2)
-MAX_RETRIES = 4
+# bigdata.kepco.co.kr는 단시간 연속 조회(발전 5사 순회 등)에 커넥션 리셋으로
+# 레이트리밋을 건다 (run #30에서 3개사 연속 성공 후 4번째부터 reset 확인).
+# 요청 간격을 넉넉히 잡고, 백오프도 리셋 해제까지 버티도록 길게 둔다.
+REQUEST_INTERVAL = 5.0
+MAX_RETRIES = 5
+BACKOFF_BASE = 6.0  # 6/12/24/48초 — 총 90초까지 대기
 MAX_RANGE_DAYS = 90      # noticeBeginDate~noticeEndDate 최대 조회 범위
 
 COMPANY_KEPCO = "COM01"  # 한국전력공사
@@ -91,7 +95,8 @@ class KEPCOAdapter(BaseProcurementAdapter):
         }
         r = get_with_retry(
             BASE_URL, query, timeout=self.timeout, session=self.session,
-            max_retries=MAX_RETRIES, sleep_before=REQUEST_INTERVAL, label="KEPCO",
+            max_retries=MAX_RETRIES, backoff_base=BACKOFF_BASE,
+            sleep_before=REQUEST_INTERVAL, label="KEPCO",
         )
         return self._parse_response(r.text)
 
