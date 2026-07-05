@@ -34,8 +34,12 @@ from ..long_term_detector import detect_long_term_from_raw
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://bigdata.kepco.co.kr/openapi/v1/electContract.do"
-REQUEST_INTERVAL = 1.0   # 초당 최대 1 req (실행계획 §2.2)
-MAX_RETRIES = 4
+# bigdata.kepco.co.kr는 단시간 연속 조회(발전 5사 순회 등)에 커넥션 리셋으로
+# 레이트리밋을 건다 (run #30에서 3개사 연속 성공 후 4번째부터 reset 확인).
+# 요청 간격을 넉넉히 잡고, 백오프도 리셋 해제까지 버티도록 길게 둔다.
+REQUEST_INTERVAL = 5.0
+MAX_RETRIES = 5
+BACKOFF_BASE = 6.0  # 6/12/24/48초 — 총 90초까지 대기
 MAX_RANGE_DAYS = 90      # noticeBeginDate~noticeEndDate 최대 조회 범위
 
 COMPANY_KEPCO = "COM01"  # 한국전력공사
@@ -91,7 +95,8 @@ class KEPCOAdapter(BaseProcurementAdapter):
         }
         r = get_with_retry(
             BASE_URL, query, timeout=self.timeout, session=self.session,
-            max_retries=MAX_RETRIES, sleep_before=REQUEST_INTERVAL, label="KEPCO",
+            max_retries=MAX_RETRIES, backoff_base=BACKOFF_BASE,
+            sleep_before=REQUEST_INTERVAL, label="KEPCO",
         )
         return self._parse_response(r.text)
 
@@ -142,13 +147,15 @@ class KEPCOAdapter(BaseProcurementAdapter):
 
     def normalize(self, raw: dict) -> dict:
         notice_no = self._clean(raw.get("no"))
-        # 차수 필드가 없으므로 1 고정 (notice_id = kepco:{공고번호}:{차수})
+        # 차수 필드가 없으므로 1 고정 (notice_id = {source}:{공고번호}:{차수}).
+        # source/agency_code는 클래스 속성 기준 — 발전 자회사 서브클래스
+        # (kepco_family.py)가 companyId만 바꿔 그대로 재사용한다.
         return {
-            "notice_id":               f"kepco:{notice_no}:1",
+            "notice_id":               f"{self.source}:{notice_no}:1",
             "source":                  self.source,
             "notice_no":               notice_no,
             "notice_rev":              1,
-            "agency_code":             "KEPCO",
+            "agency_code":             self.agency_codes[0],
             "title":                   self._clean(raw.get("name")),
             "work_type":               self._work_type(raw),
             "construction_type":       self._construction_type(raw),

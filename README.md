@@ -30,7 +30,9 @@
 > 계약정보(`dmndInsttNm=한국전력공사`)로 보완하며, srm.kepco.net XHR은 커버리지
 > 미달 시 폴백입니다. `KEPCO_API_KEY` 미설정 시 해당 소스는 경고 후 skip 됩니다.
 > 같은 API가 `companyId`로 발전 자회사(서부·남부·중부·남동·동서발전)도 지원하므로
-> Phase 2 발전 5사는 본 어댑터 재사용이 유력합니다 (`kepco.COMPANY_IDS` 참고).
+> Phase 2 발전 5사(Wave B)는 이 API를 재사용합니다 — `src/adapters/kepco_family.py`의
+> 5개 서브클래스(ewp·komipo·kospo·koen·kowepo)가 companyId만 바꿔 수집하며,
+> KEPCO_API_KEY를 공유합니다. KHNP는 보류 상태입니다 (조사 문서 참고).
 
 ## 실행
 
