@@ -121,6 +121,31 @@ def test_fetch_notices_90_days_single_call(adapter):
     assert mock_get.call_count == 1
 
 
+def test_fetch_notices_404_treated_as_empty(adapter):
+    """조회 결과 0건인 구간에 API가 404를 주는 실측 동작 → 빈 결과로 처리.
+
+    (2022-12-30~31 × COM06에서 재현 — 같은 구간 타사 companyId는 정상 응답.)
+    """
+    import requests as _rq
+    resp = MagicMock()
+    resp.status_code = 404
+    with patch("src.adapters.kepco.get_with_retry",
+               side_effect=_rq.HTTPError("404 Client Error", response=resp)):
+        rows = list(adapter.fetch_notices(date(2022, 12, 30), date(2022, 12, 31)))
+    assert rows == []
+
+
+def test_fetch_notices_other_http_error_raises(adapter):
+    """404 이외의 HTTP 오류(403 등)는 그대로 올라와야 함."""
+    import requests as _rq
+    resp = MagicMock()
+    resp.status_code = 403
+    with patch("src.adapters.kepco.get_with_retry",
+               side_effect=_rq.HTTPError("403 Client Error", response=resp)):
+        with pytest.raises(_rq.HTTPError):
+            list(adapter.fetch_notices(date(2026, 1, 1), date(2026, 1, 31)))
+
+
 # ------------------------------------------------------------------ #
 # normalize — 필드 매핑                                                #
 # ------------------------------------------------------------------ #

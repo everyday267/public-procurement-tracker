@@ -115,10 +115,17 @@ jobs:
       - name: 수집 결과 요약 (표본 대조용)
         if: steps.guard.outputs.should_run == 'true'
         run: |
-          for f in output/*_joined_*.csv output/*_contracts_*.csv; do
+          # 통합 조인 CSV와 계약 CSV는 전문 출력한다 — 개발 컨테이너에서
+          # 아티팩트를 내려받을 수 없어 로그가 유일한 데이터 회수 경로다.
+          for f in output/all_joined_*.csv output/*_contracts_*.csv; do
             [ -f "$f" ] || continue
             echo "===== $f ($(($(wc -l < "$f") - 1))행) ====="
-            head -21 "$f"
+            cat "$f"
+          done
+          for f in output/*_joined_*.csv; do
+            case "$f" in output/all_joined_*) continue ;; esac
+            [ -f "$f" ] || continue
+            echo "===== $f ($(($(wc -l < "$f") - 1))행) ====="
           done
 
       - name: DB 업로드 (아티팩트)
