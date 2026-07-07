@@ -93,11 +93,20 @@ class KEPCOAdapter(BaseProcurementAdapter):
             "apiKey": self.service_key,
             "returnType": "json",
         }
-        r = get_with_retry(
-            BASE_URL, query, timeout=self.timeout, session=self.session,
-            max_retries=MAX_RETRIES, backoff_base=BACKOFF_BASE,
-            sleep_before=REQUEST_INTERVAL, label="KEPCO",
-        )
+        try:
+            r = get_with_retry(
+                BASE_URL, query, timeout=self.timeout, session=self.session,
+                max_retries=MAX_RETRIES, backoff_base=BACKOFF_BASE,
+                sleep_before=REQUEST_INTERVAL, label="KEPCO",
+            )
+        except requests.HTTPError as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status == 404:
+                # bigdata API는 조회 결과가 0건인 기간·회사 조합에 404를 반환한다
+                # (2022-12-30~31 × COM06 실측 — 같은 구간 타사는 정상 응답).
+                logger.info("[KEPCO] 404 응답 → 해당 구간 공고 없음 처리 (%s)", params)
+                return []
+            raise
         return self._parse_response(r.text)
 
     def _parse_response(self, text: str) -> list:
