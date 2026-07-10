@@ -135,6 +135,17 @@ def test_fetch_notices_404_treated_as_empty(adapter):
     assert rows == []
 
 
+def test_fetch_notices_skips_failed_chunk(adapter):
+    """한 90일 창이 재시도로도 실패하면(커넥션 리셋/타임아웃) 그 창만 스킵하고
+    나머지 창은 계속 수집해야 한다 — bigdata 간헐 장애에 부분 수집이라도 회수."""
+    import requests as _rq
+    # 1/1~6/30 = 3개 창. 첫 창 커넥션 리셋 → 스킵, 나머지 정상 수집.
+    with patch.object(adapter, "_get",
+                      side_effect=[_rq.ConnectionError("reset"), [{"no": "K2"}], []]):
+        rows = list(adapter.fetch_notices(date(2026, 1, 1), date(2026, 6, 30)))
+    assert rows == [{"no": "K2"}]
+
+
 def test_fetch_notices_other_http_error_raises(adapter):
     """404 이외의 HTTP 오류(403 등)는 그대로 올라와야 함."""
     import requests as _rq

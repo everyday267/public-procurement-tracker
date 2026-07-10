@@ -133,14 +133,30 @@ class KEPCOAdapter(BaseProcurementAdapter):
     # ── Fetch ──────────────────────────────────────────────────────────────
 
     def fetch_notices(self, since: date, until: date) -> Iterator[dict]:
-        """입찰공고 수집 (공고일 noticeBeginDate~noticeEndDate 기준)."""
+        """입찰공고 수집 (공고일 noticeBeginDate~noticeEndDate 기준).
+
+        bigdata.kepco.co.kr는 간헐적으로 커넥션 리셋/타임아웃을 낸다. 재시도로도
+        복구 못한 90일 창 하나가 연간 수집 전체를 무너뜨리지 않도록, 창 단위
+        실패는 ERROR로 남기고 다음 창으로 진행한다(부분 수집이라도 회수).
+        """
+        failed = []
         for begin, end in self._date_chunks(since, until):
-            rows = self._get({
-                "noticeBeginDate": begin.strftime("%Y%m%d"),
-                "noticeEndDate":   end.strftime("%Y%m%d"),
-            })
+            try:
+                rows = self._get({
+                    "noticeBeginDate": begin.strftime("%Y%m%d"),
+                    "noticeEndDate":   end.strftime("%Y%m%d"),
+                })
+            except (requests.ConnectionError, requests.Timeout):
+                # 재시도로도 복구 못한 커넥션 리셋/타임아웃 → 이 창만 스킵.
+                # (403 등 HTTP 오류는 어댑터 설정 문제이므로 그대로 올린다.)
+                logger.exception("[KEPCO] 공고 %s~%s 조회 실패 — 이 구간 스킵", begin, end)
+                failed.append((begin, end))
+                continue
             logger.info("[KEPCO] 공고 %s~%s: %d건", begin, end, len(rows))
             yield from rows
+        if failed:
+            logger.error("[KEPCO] 조회 실패 구간 %d개 (부분 수집): %s",
+                         len(failed), ", ".join("%s~%s" % (b, e) for b, e in failed))
 
     def fetch_awards(self, since: date, until: date) -> Iterator[dict]:
         """낙찰결과 — 본 API 미제공 (명세 확정). G2B 계약정보로 보완한다."""
