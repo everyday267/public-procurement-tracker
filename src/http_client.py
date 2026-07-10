@@ -18,7 +18,24 @@ DEFAULT_HEADERS = {
     "Accept": "*/*",
 }
 
-RETRYABLE_STATUS = (500, 502, 503, 504)
+RETRYABLE_STATUS = (429, 500, 502, 503, 504)
+# 429(Too Many Requests)는 레이트리밋이므로 5xx보다 더 오래 쉬어야 한다.
+RATE_LIMIT_STATUS = (429,)
+RATE_LIMIT_MIN_WAIT = 30.0   # 429 최소 대기(초) — data.go.kr 일시 초과 대응
+MAX_BACKOFF = 120.0          # 대기 상한(초)
+
+
+def _retry_after_seconds(exc):
+    """HTTPError의 응답에 Retry-After 헤더가 있으면 초 단위로 반환, 없으면 None."""
+    resp = getattr(exc, "response", None)
+    headers = getattr(resp, "headers", None) or {}
+    val = headers.get("Retry-After")
+    if not val:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
 
 
 def get_with_retry(url, params, timeout=30, session=None, headers=None,
@@ -50,6 +67,7 @@ def _request_with_retry(method, url, params=None, json_body=None, data=None,
     sess = session or requests
     hdrs = {**DEFAULT_HEADERS, **(headers or {})}
     last_exc = None
+    last_status = None
 
     for attempt in range(max_retries):
         if sleep_before:
@@ -70,13 +88,19 @@ def _request_with_retry(method, url, params=None, json_body=None, data=None,
         except requests.HTTPError as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
             if status not in RETRYABLE_STATUS:
-                raise  # 4xx 등 → 재시도 무의미, 즉시 전달
+                raise  # 4xx(429 제외) 등 → 재시도 무의미, 즉시 전달
             last_exc = e
+            last_status = status
         except (requests.ConnectionError, requests.Timeout) as e:
             last_exc = e
+            last_status = None
 
         if attempt < max_retries - 1:
             wait = backoff_base * (2 ** attempt)
+            if last_status in RATE_LIMIT_STATUS:
+                # 레이트리밋은 더 길게. Retry-After 헤더가 있으면 존중.
+                wait = max(wait, RATE_LIMIT_MIN_WAIT, _retry_after_seconds(last_exc) or 0)
+            wait = min(wait, MAX_BACKOFF)
             logger.warning("[%s] 요청 실패 (attempt %d/%d): %s — %.1fs 후 재시도",
                            label or url, attempt + 1, max_retries, last_exc, wait)
             time.sleep(wait)

@@ -343,8 +343,14 @@ def run(month: Optional[str] = None, db_path: str = "procurement.db", output_dir
                           and g2b.passes_filter(n) and n.get("notice_no")}
             logger.info("[G2B 공용] 전국 공고=%d, 대상(공사100억↑)=%d → 계약·낙찰은 대상 공고번호로만 조회",
                         len(raw_n), len(target_nos))
-            raw_a = list(g2b.fetch_awards_scoped(target_nos, start, end))
-            raw_c = list(g2b.fetch_contracts_scoped(target_nos, start, end))
+            # 낙찰·계약은 공고와 분리해 처리한다. 여기서 실패(예: 429)해도 이미
+            # 확보한 공고(raw_n)는 버리지 않고, 낙찰·계약만 빈 결과로 진행한다.
+            raw_a, raw_c = [], []
+            try:
+                raw_a = list(g2b.fetch_awards_scoped(target_nos, start, end))
+                raw_c = list(g2b.fetch_contracts_scoped(target_nos, start, end))
+            except Exception:
+                logger.exception("[G2B 공용] 낙찰·계약 조회 실패 — 공고는 유지, 낙찰·계약만 스킵")
             logger.info("[G2B 공용] 수집 완료: 공고=%d 낙찰=%d 계약=%d",
                         len(raw_n), len(raw_a), len(raw_c))
             _log_schema("G2B 공고", raw_n)

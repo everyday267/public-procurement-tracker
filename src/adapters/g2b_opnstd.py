@@ -100,6 +100,7 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
             query.update(params)
             resp = get_with_retry(
                 url, query, timeout=self.timeout, session=self.session, label="G2B",
+                max_retries=6, backoff_base=3.0,
             )
             data = resp.json()
 
