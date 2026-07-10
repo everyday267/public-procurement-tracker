@@ -123,6 +123,57 @@ CREATE TABLE IF NOT EXISTS contracts (
   collected_at          TEXT DEFAULT (datetime('now'))
 );
 
+-- KISCON 건설공사대장 통보 통계 (ConStatInfoSvc StatAmt/StatCnt).
+-- 일별 × 현장소재지 × 발주자구분 × 도급구분 셀. amt는 API 단위(억원) 그대로 저장.
+CREATE TABLE IF NOT EXISTS kiscon_stats (
+  noti_date    TEXT NOT NULL,
+  area_code    TEXT NOT NULL,
+  balju_code   TEXT NOT NULL,
+  dogub_code   TEXT NOT NULL,
+  amt_100m     REAL,
+  cnt          INTEGER,
+  area_name    TEXT,
+  raw_payload  TEXT,
+  collected_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (noti_date, area_code, balju_code, dogub_code)
+);
+
+-- KISCON 건별 통보 레코드 (건별 리스트 오퍼레이션 — probe로 스펙 확정 후 수집).
+-- contract_price는 원 단위로 환산 저장한다 (환산 계수는 src/kiscon.py 참고).
+CREATE TABLE IF NOT EXISTS kiscon_records (
+  record_key      TEXT PRIMARY KEY,
+  noti_date       TEXT,
+  area_code       TEXT,
+  balju_code      TEXT,
+  dogub_code      TEXT,
+  work_name       TEXT,
+  contractor_name TEXT,
+  contract_price  INTEGER,
+  start_date      TEXT,
+  end_date_plan   TEXT,
+  raw_payload     TEXT,
+  collected_at    TEXT DEFAULT (datetime('now')),
+  UNIQUE (noti_date, work_name, contract_price)
+);
+
+-- KISCON 대조 결과. validate_kiscon이 기록하고 schema_monitor가 읽어 이슈화한다.
+CREATE TABLE IF NOT EXISTS kiscon_recon (
+  ym          TEXT NOT NULL,   -- 대상 월 YYYY-MM
+  level       TEXT NOT NULL,   -- L0_AMT | L0_CNT | L2
+  basis       TEXT NOT NULL,   -- contract_month | lag_adjusted
+  ours_krw    INTEGER,
+  kiscon_krw  INTEGER,
+  ratio       REAL,
+  n_ours      INTEGER,
+  n_kiscon    INTEGER,
+  n_matched   INTEGER,
+  n_hat       INTEGER,         -- L2: Lincoln-Petersen 모집단 추정치
+  flag        TEXT,            -- NULL | RATIO_GE_1 | OUT_OF_BAND | RATIO_JUMP | NO_KISCON_DATA
+  detail      TEXT,
+  computed_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (ym, level, basis)
+);
+
 CREATE TABLE IF NOT EXISTS source_runs (
   run_id          TEXT PRIMARY KEY,
   source          TEXT,
@@ -141,6 +192,8 @@ CREATE INDEX IF NOT EXISTS idx_contracts_no        ON contracts(notice_no);
 CREATE INDEX IF NOT EXISTS idx_contracts_date      ON contracts(contracted_at);
 CREATE INDEX IF NOT EXISTS idx_contracts_inst      ON contracts(demand_inst);
 CREATE INDEX IF NOT EXISTS idx_notices_posted      ON notices(posted_at);
+CREATE INDEX IF NOT EXISTS idx_kiscon_stats_date   ON kiscon_stats(noti_date);
+CREATE INDEX IF NOT EXISTS idx_kiscon_records_date ON kiscon_records(noti_date);
 """
 
 
@@ -199,6 +252,22 @@ def insert_awards(conn: sqlite3.Connection, rows: list[dict]) -> int:
     conn.executemany(sql, [tuple(r.get(c) for c in cols) for r in rows])
     conn.commit()
     return len(rows)
+
+
+def upsert_kiscon_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
+    """KISCON 집계 셀 upsert. PK(일자·지역·발주자·도급) 기준 멱등 — 재수집 시
+    지연 통보가 반영된 최신 값으로 교체된다."""
+    return _upsert(conn, "kiscon_stats", rows)
+
+
+def upsert_kiscon_records(conn: sqlite3.Connection, rows: list[dict]) -> int:
+    """KISCON 건별 레코드 upsert. record_key 기준 멱등."""
+    return _upsert(conn, "kiscon_records", rows)
+
+
+def upsert_kiscon_recon(conn: sqlite3.Connection, rows: list[dict]) -> int:
+    """KISCON 대조 결과 upsert. (ym, level, basis) 기준 — 재검증 시 교체."""
+    return _upsert(conn, "kiscon_recon", rows)
 
 
 def insert_contracts(conn: sqlite3.Connection, rows: list[dict]) -> int:

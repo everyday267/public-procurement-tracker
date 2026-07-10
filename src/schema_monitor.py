@@ -29,6 +29,9 @@ EXPECTED_KEYS: Dict[str, List[str]] = {
 
 ISSUE_LABEL = "schema-monitor"
 
+# KISCON 대조(validate_kiscon)가 남긴 플래그를 이슈화할 때 쓰는 라벨
+KISCON_LABEL = "kiscon-validation"
+
 
 def latest_runs(conn: sqlite3.Connection) -> List[dict]:
     cur = conn.execute("""
@@ -68,11 +71,44 @@ def check_schema_drift(conn: sqlite3.Connection, source: str) -> Optional[str]:
     return None
 
 
+def check_kiscon_recon(conn: sqlite3.Connection) -> List[dict]:
+    """validate_kiscon이 kiscon_recon에 남긴 최신 배치의 플래그 행을 문제로 변환.
+
+    테이블이 없는 구버전 DB는 조용히 건너뛴다.
+    """
+    try:
+        cur = conn.execute("""
+            SELECT ym, level, basis, ratio, flag, detail
+            FROM kiscon_recon
+            WHERE flag IS NOT NULL
+              AND computed_at = (SELECT MAX(computed_at) FROM kiscon_recon)
+        """)
+    except sqlite3.OperationalError:
+        return []
+    problems = []
+    for row in cur.fetchall():
+        ratio = "{:.3f}".format(row["ratio"]) if row["ratio"] is not None else "-"
+        problems.append({
+            "source": "kiscon",
+            "label": KISCON_LABEL,
+            "title": "[kiscon-validation] {} {}/{} {} (ratio={})".format(
+                row["ym"], row["level"], row["basis"], row["flag"], ratio),
+            "body": (
+                "KISCON 대조 검증에서 플래그가 발생했습니다.\n"
+                "ym={}\nlevel={}\nbasis={}\nflag={}\nratio={}\ndetail={}\n\n"
+                "output/kiscon_recon_*.csv 및 monthly-collect 로그를 확인하세요."
+            ).format(row["ym"], row["level"], row["basis"], row["flag"],
+                     ratio, row["detail"]),
+        })
+    return problems
+
+
 def find_problems(db_path: str) -> List[dict]:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     problems = []
     try:
+        problems.extend(check_kiscon_recon(conn))
         for run in latest_runs(conn):
             source = run["source"]
             if run["status"] != "success":
@@ -99,25 +135,26 @@ def find_problems(db_path: str) -> List[dict]:
     return problems
 
 
-def _open_issue_titles(token: str, repo: str) -> List[str]:
+def _open_issue_titles(token: str, repo: str, label: str) -> List[str]:
     resp = requests.get(
         f"https://api.github.com/repos/{repo}/issues",
         headers={"Authorization": f"token {token}", "Accept": "application/vnd.github+json"},
-        params={"state": "open", "labels": ISSUE_LABEL, "per_page": 100},
+        params={"state": "open", "labels": label, "per_page": 100},
         timeout=15,
     )
     resp.raise_for_status()
     return [i["title"] for i in resp.json()]
 
 
-def create_github_issue(title: str, body: str, token: str, repo: str) -> None:
-    if title in _open_issue_titles(token, repo):
+def create_github_issue(title: str, body: str, token: str, repo: str,
+                        label: str = ISSUE_LABEL) -> None:
+    if title in _open_issue_titles(token, repo, label):
         logger.info("이미 열려있는 이슈 존재, 건너뜀: %s", title)
         return
     resp = requests.post(
         f"https://api.github.com/repos/{repo}/issues",
         headers={"Authorization": f"token {token}", "Accept": "application/vnd.github+json"},
-        json={"title": title, "body": body, "labels": [ISSUE_LABEL]},
+        json={"title": title, "body": body, "labels": [label]},
         timeout=15,
     )
     resp.raise_for_status()
@@ -139,7 +176,8 @@ def main() -> int:
     for p in problems:
         logger.warning("%s", p["title"])
         if token and repo:
-            create_github_issue(p["title"], p["body"], token, repo)
+            create_github_issue(p["title"], p["body"], token, repo,
+                                label=p.get("label", ISSUE_LABEL))
         else:
             logger.info("GITHUB_TOKEN/GITHUB_REPOSITORY 없음 — 이슈 생성 생략 (로컬 실행)")
 

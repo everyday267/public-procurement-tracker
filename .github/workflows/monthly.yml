@@ -45,6 +45,7 @@ jobs:
         env:
           EX_API_KEY: ${{ secrets.EX_API_KEY }}
           DATA_EX_API_KEY: ${{ secrets.DATA_EX_API_KEY }}
+          KISCON_API_KEY: ${{ secrets.KISCON_API_KEY }}
       - name: 샘플 업로드
         if: always()
         uses: actions/upload-artifact@v4
@@ -112,12 +113,22 @@ jobs:
           KEPCO_API_KEY: ${{ secrets.KEPCO_API_KEY }}
           EX_API_KEY: ${{ secrets.EX_API_KEY }}
 
+      - name: KISCON 대조 검증 (검증 층 2)
+        if: steps.guard.outputs.should_run == 'true'
+        # 검증 실패(플래그 발생·API 장애)가 수집 산출물 업로드를 막지 않도록 한다.
+        # 플래그는 kiscon_recon 테이블에 남아 schema-monitor 워크플로우가 이슈화한다.
+        continue-on-error: true
+        run: python -m src.validate_kiscon --db procurement.db ${{ steps.args.outputs.cli }}
+        env:
+          KISCON_API_KEY: ${{ secrets.KISCON_API_KEY }}
+          KISCON_RECORDS_OP: ${{ vars.KISCON_RECORDS_OP }}
+
       - name: 수집 결과 요약 (표본 대조용)
         if: steps.guard.outputs.should_run == 'true'
         run: |
           # 통합 조인 CSV와 계약 CSV는 전문 출력한다 — 개발 컨테이너에서
           # 아티팩트를 내려받을 수 없어 로그가 유일한 데이터 회수 경로다.
-          for f in output/all_joined_*.csv output/*_contracts_*.csv; do
+          for f in output/all_joined_*.csv output/*_contracts_*.csv output/kiscon_recon_*.csv output/kiscon_recon_*.md; do
             [ -f "$f" ] || continue
             echo "===== $f ($(($(wc -l < "$f") - 1))행) ====="
             cat "$f"

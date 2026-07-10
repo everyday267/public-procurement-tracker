@@ -70,9 +70,29 @@ python -m src.run_monthly --since 2026-06-01 --until 2026-06-07 --sources g2b_op
 | `LH_API_KEY` | LH e-Bid 자체 OpenAPI |
 | `KEPCO_API_KEY` | 한전 전자입찰계약정보 OpenAPI (공공데이터포털 발급) |
 | `EX_API_KEY` | 한국도로공사 전자조달 계약공개현황 OpenAPI (data.ex.co.kr 발급) |
+| `KISCON_API_KEY` | 키스콘 건설공사대장 통보 통계 OpenAPI (공공데이터포털 발급, KISCON 대조 검증용) |
 
 시크릿이 Settings → Secrets and variables → Actions에 등록되어 있어야
 `monthly-collect` / `quarterly-backfill` 워크플로우가 정상 동작합니다.
+
+## KISCON 대조 검증 (검증 층 2)
+
+월간 수집 후 `validate_kiscon`이 우리 계약 합계를 KISCON(건설공사대장 통보 통계,
+`ConStatInfoSvc`) 공공×원도급 집계와 대조합니다. 우리 DB는 100억↑ 부분집합이므로
+`ratio = 우리 ÷ KISCON < 1`이 불변식이며, 위반(`RATIO_GE_1`)·밴드 이탈(`OUT_OF_BAND`)
+등의 플래그는 `kiscon_recon` 테이블에 기록되고 schema-monitor 워크플로우가
+`kiscon-validation` 라벨 이슈로 등록합니다.
+
+```bash
+export KISCON_API_KEY=...
+python -m src.validate_kiscon --db procurement.db --month 2026-06
+python -m src.validate_kiscon --db procurement.db --skip-fetch   # 수집 생략, 대조만
+```
+
+- 산출물: `output/kiscon_recon_{label}.csv` / `.md` (monthly-collect 로그에도 전문 출력)
+- 건별 대조(L2)·모집단 추정은 건별 리스트 오퍼레이션 확정 후 활성화됩니다:
+  `scripts/probe_kiscon.py`를 probe_script로 디스패치해 엔드포인트를 확정하고,
+  리포지토리 변수 `KISCON_RECORDS_OP`에 오퍼레이션명을 등록하면 수집이 켜집니다.
 
 ## 디렉토리
 ```
