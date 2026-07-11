@@ -156,6 +156,28 @@ CREATE TABLE IF NOT EXISTS kiscon_records (
   UNIQUE (noti_date, work_name, contract_price)
 );
 
+-- KOSIS 통계 (건설협회 통계 OpenAPI). 종합/전문/전기 공사규모별·발주기관별
+-- 계약실적. getList 응답을 long-format으로 저장한다. 분류축(공사규모/발주기관/
+-- 지역 등)은 표마다 다르므로 C1~C3의 코드·값·축이름(obj)을 그대로 보관해
+-- 검증 단계에서 이름으로 매핑한다. dt 단위는 unit_nm 참조(백만원·건 등).
+CREATE TABLE IF NOT EXISTS kosis_stats (
+  org_id       TEXT NOT NULL,
+  tbl_id       TEXT NOT NULL,
+  industry     TEXT,            -- 종합 | 전문 | 전기 (레지스트리 유래)
+  prd_se       TEXT,            -- Y | M | Q
+  prd_de       TEXT NOT NULL,   -- 기간 (YYYY 또는 YYYYMM)
+  itm_id       TEXT NOT NULL,
+  itm_nm       TEXT,
+  unit_nm      TEXT,
+  c1_obj       TEXT, c1_code TEXT, c1_nm TEXT,
+  c2_obj       TEXT, c2_code TEXT, c2_nm TEXT,
+  c3_obj       TEXT, c3_code TEXT, c3_nm TEXT,
+  dt           REAL,
+  raw_payload  TEXT,
+  collected_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (org_id, tbl_id, itm_id, prd_de, c1_code, c2_code, c3_code)
+);
+
 -- KISCON 대조 결과. validate_kiscon이 기록하고 schema_monitor가 읽어 이슈화한다.
 CREATE TABLE IF NOT EXISTS kiscon_recon (
   ym          TEXT NOT NULL,   -- 대상 월 YYYY-MM
@@ -194,6 +216,7 @@ CREATE INDEX IF NOT EXISTS idx_contracts_inst      ON contracts(demand_inst);
 CREATE INDEX IF NOT EXISTS idx_notices_posted      ON notices(posted_at);
 CREATE INDEX IF NOT EXISTS idx_kiscon_stats_date   ON kiscon_stats(noti_date);
 CREATE INDEX IF NOT EXISTS idx_kiscon_records_date ON kiscon_records(noti_date);
+CREATE INDEX IF NOT EXISTS idx_kosis_industry     ON kosis_stats(industry, prd_de);
 """
 
 
@@ -263,6 +286,11 @@ def upsert_kiscon_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
 def upsert_kiscon_records(conn: sqlite3.Connection, rows: list[dict]) -> int:
     """KISCON 건별 레코드 upsert. record_key 기준 멱등."""
     return _upsert(conn, "kiscon_records", rows)
+
+
+def upsert_kosis_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
+    """KOSIS 통계 upsert. (org·tbl·itm·기간·분류코드) 기준 멱등."""
+    return _upsert(conn, "kosis_stats", rows)
 
 
 def upsert_kiscon_recon(conn: sqlite3.Connection, rows: list[dict]) -> int:

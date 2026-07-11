@@ -71,6 +71,7 @@ python -m src.run_monthly --since 2026-06-01 --until 2026-06-07 --sources g2b_op
 | `KEPCO_API_KEY` | 한전 전자입찰계약정보 OpenAPI (공공데이터포털 발급) |
 | `EX_API_KEY` | 한국도로공사 전자조달 계약공개현황 OpenAPI (data.ex.co.kr 발급) |
 | `KISCON_API_KEY` | 키스콘 건설공사대장 통보 통계 OpenAPI (공공데이터포털 발급, KISCON 대조 검증용) |
+| `KOSIS_API_KEY` | KOSIS 건설업 통계 OpenAPI (kosis.kr 발급, 종합·전문·전기 공사규모별 계약실적) |
 
 시크릿이 Settings → Secrets and variables → Actions에 등록되어 있어야
 `monthly-collect` / `quarterly-backfill` 워크플로우가 정상 동작합니다.
@@ -93,6 +94,33 @@ python -m src.validate_kiscon --db procurement.db --skip-fetch   # 수집 생략
 - 건별 대조(L2)·모집단 추정은 건별 리스트 오퍼레이션 확정 후 활성화됩니다:
   `scripts/probe_kiscon.py`를 probe_script로 디스패치해 엔드포인트를 확정하고,
   리포지토리 변수 `KISCON_RECORDS_OP`에 오퍼레이션명을 등록하면 수집이 켜집니다.
+
+## KOSIS 건설업 통계 (검증 보조 소스)
+
+KISCON `StatAmt`에 없던 **공사규모(금액구간)** 축을 KOSIS 건설협회 통계에서
+보완합니다. 종합·전문·전기 건설업의 공사규모별 × 발주기관별 계약실적을
+`kosis_stats` 테이블에 long-format으로 저장합니다 (표마다 분류축 순서가 달라
+축이름 `Cn_OBJ_NM`을 함께 보관하고 이름으로 매핑).
+
+| 표 | orgId / tblId | 항목 |
+|---|---|---|
+| 종합건설업 | 365 / DT_365001_A072 | 계약액·계약건수 |
+| 전문건설업 | 366 / TX_36601_A089 | 계약액·계약건수 |
+| 전기공사업 | 370 / DT_370001_A010 | 공사건수·실적액 |
+
+```bash
+export KOSIS_API_KEY=...
+python -m src.kosis --db procurement.db                 # 3종 전체 수집 + 축 요약
+python -m src.kosis --db procurement.db --tables gen --prd-se M --periods 12
+python -m src.kosis --db procurement.db --skip-fetch    # 저장분 축 요약만
+```
+
+- 표별 분류축(어느 C가 공사규모/발주기관인지)·100억↑ 구간 존재 여부는
+  `scripts/probe_kosis.py`를 probe_script로 디스패치해 실측 확인합니다
+  (개발 컨테이너는 kosis.kr egress가 정책 차단이라 러너에서 실행).
+- 저장 후 `scale_agency_summary()`가 공사규모 × 발주기관 피벗을 이름 기반으로
+  산출하므로, 우리 100억↑ 계약합계와 KOSIS 100억↑ 구간을 업종별로 대조할 수
+  있습니다 (대조 로직 통합은 probe로 축 확정 후 진행).
 
 ## 디렉토리
 ```

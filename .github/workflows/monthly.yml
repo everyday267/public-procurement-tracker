@@ -46,6 +46,7 @@ jobs:
           EX_API_KEY: ${{ secrets.EX_API_KEY }}
           DATA_EX_API_KEY: ${{ secrets.DATA_EX_API_KEY }}
           KISCON_API_KEY: ${{ secrets.KISCON_API_KEY }}
+          KOSIS_API_KEY: ${{ secrets.KOSIS_API_KEY }}
       - name: 샘플 업로드
         if: always()
         uses: actions/upload-artifact@v4
@@ -122,6 +123,15 @@ jobs:
         env:
           KISCON_API_KEY: ${{ secrets.KISCON_API_KEY }}
           KISCON_RECORDS_OP: ${{ vars.KISCON_RECORDS_OP }}
+
+      - name: KOSIS 건설업 통계 수집 (검증 보조)
+        if: steps.guard.outputs.should_run == 'true'
+        # 종합·전문·전기 공사규모별 발주기관별 계약실적. 수집·요약 실패가
+        # 산출물 업로드를 막지 않도록 한다.
+        continue-on-error: true
+        run: python -m src.kosis --db procurement.db
+        env:
+          KOSIS_API_KEY: ${{ secrets.KOSIS_API_KEY }}
 
       - name: 수집 결과 요약 (표본 대조용)
         if: steps.guard.outputs.should_run == 'true'
