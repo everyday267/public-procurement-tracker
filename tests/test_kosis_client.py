@@ -189,23 +189,44 @@ def test_fetch_table_resilient_retries_transient_error(client, monkeypatch):
     assert len(out) == 4 and calls["n"] == 3
 
 
-def test_fetch_table_resilient_falls_back_to_one_period(client, monkeypatch):
+def test_fetch_table_resilient_per_year_backfill(client, monkeypatch):
+    # 대량 호출은 objL 오탐으로 실패 → 연도별 개별 수집으로 다년 확보
     import time
     from src.kosis import _fetch_table_resilient
     monkeypatch.setattr(time, "sleep", lambda *_: None)
-    gen = load_json_fixture("kosis", "gen_a072.json")
 
-    seen = []
+    def _row(year):
+        return {"PRD_DE": year, "C2_OBJ_NM": "공사규모별", "C2_NM": "100억원이상",
+                "ITM_NM": "금액", "UNIT_NM": "백만원", "DT": "1", "ORG_ID": "365",
+                "TBL_ID": "DT_365001_A072"}
 
-    def only_one_period(table, prd_se=None, num_periods=10):
-        seen.append(num_periods)
-        if num_periods != 1:
-            raise KosisError("필수요청변수값이 누락되었습니다. (objL)")
-        return gen
+    def fake(table, prd_se=None, num_periods=10, start_prd=None, end_prd=None):
+        if start_prd is None:
+            if num_periods == 1:
+                return [_row("2024")]                    # 최신 연도 파악
+            raise KosisError("필수요청변수값이 누락되었습니다. (objL)")   # 대량 실패
+        return [_row(start_prd)] if start_prd in ("2023", "2022") else []  # 개별 연도
 
-    client.fetch_table = only_one_period
-    out = _fetch_table_resilient(client, KOSIS_TABLES["gen"], None, 10, attempts=2)
-    assert len(out) == 4 and seen[-1] == 1               # 축소 재시도로 성공
+    client.fetch_table = fake
+    out = _fetch_table_resilient(client, KOSIS_TABLES["gen"], None, 3)
+    assert {r["PRD_DE"] for r in out} == {"2024", "2023", "2022"}
+
+
+def test_fetch_by_year_skips_failing_years(client, monkeypatch):
+    import time
+    from src.kosis import _fetch_by_year
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
+
+    def fake(table, prd_se=None, num_periods=10, start_prd=None, end_prd=None):
+        if start_prd is None:
+            return [{"PRD_DE": "2024", "DT": "1"}]
+        if start_prd == "2022":
+            raise KosisError("일시 오류")                 # 이 연도만 실패 → 건너뜀
+        return [{"PRD_DE": start_prd, "DT": "1"}]
+
+    client.fetch_table = fake
+    out = _fetch_by_year(client, KOSIS_TABLES["gen"], None, 3, attempts=1)
+    assert {r["PRD_DE"] for r in out} == {"2024", "2023"}   # 2022 실패 제외
 
 
 # ── 축 매핑 + 월별 중복 방지 ─────────────────────────────────────────────

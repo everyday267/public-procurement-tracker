@@ -152,12 +152,47 @@ class KosisClient:
         return row
 
 
+def _fetch_by_year(client, table, prd_se, num_periods, attempts=2, pause=1.0):
+    # type: (KosisClient, KosisTable, Optional[str], int, int, float) -> List[dict]
+    """연도별 개별 수집. 대량 호출이 objL 오탐으로 실패하는 표(종합·전기)의
+    다년 백필용 — 단년 요청(startPrdDe=endPrdDe)은 작아서 대체로 성공한다.
+
+    최신 연도를 newEstPrdCnt=1로 파악한 뒤, 그 연도부터 num_periods개 연도를
+    각각 조회해 합친다. 개별 연도 실패는 건너뛴다.
+    """
+    import time
+
+    latest = client.fetch_table(table, prd_se=prd_se, num_periods=1)
+    years = sorted({str(r.get("PRD_DE", "")) for r in latest
+                    if str(r.get("PRD_DE", "")).isdigit()})
+    if not years:
+        return latest
+    latest_year = int(years[-1])
+    combined = list(latest)                       # 최신 연도 포함
+    for y in range(latest_year - 1, latest_year - num_periods, -1):
+        got = None
+        for i in range(attempts):
+            try:
+                got = client.fetch_table(table, prd_se=prd_se,
+                                         start_prd=str(y), end_prd=str(y))
+                break
+            except (KosisError, requests.RequestException) as e:
+                logger.warning("[KOSIS] %s %d년 시도 %d/%d 실패: %s",
+                               table.key, y, i + 1, attempts, e)
+                time.sleep(pause)
+        if got:
+            combined.extend(got)
+    n_years = len({str(r.get("PRD_DE")) for r in combined})
+    logger.info("[KOSIS] %s 연도별 폴백: %d개 연도 %d행", table.key, n_years, len(combined))
+    return combined
+
+
 def _fetch_table_resilient(client, table, prd_se, num_periods, attempts=3, pause=1.5):
     # type: (KosisClient, KosisTable, Optional[str], int, int, float) -> List[dict]
     """표 단위 회복 수집. KOSIS는 유효한 요청에도 간헐적으로
     '필수요청변수값이 누락되었습니다' 오류 객체(HTTP 200)를 반환하므로
     (get_with_retry는 이를 재시도하지 않음) 여기서 표 단위로 재시도한다.
-    끝까지 실패하면 마지막 수단으로 num_periods=1로 축소 재시도한다."""
+    끝까지 실패하면 연도별 개별 수집으로 폴백해 다년치를 확보한다."""
     import time
 
     last = None
@@ -168,10 +203,13 @@ def _fetch_table_resilient(client, table, prd_se, num_periods, attempts=3, pause
             last = e
             logger.warning("[KOSIS] %s 시도 %d/%d 실패: %s", table.key, i + 1, attempts, e)
             time.sleep(pause)
-    if num_periods != 1:
-        logger.warning("[KOSIS] %s num_periods=1로 축소 재시도", table.key)
+    if num_periods and num_periods > 1:
+        logger.warning("[KOSIS] %s 연도별 개별 수집으로 폴백 (%d개 연도)",
+                       table.key, num_periods)
         try:
-            return client.fetch_table(table, prd_se=prd_se, num_periods=1)
+            rows = _fetch_by_year(client, table, prd_se, num_periods, pause=pause)
+            if rows:
+                return rows
         except (KosisError, requests.RequestException) as e:
             last = e
     raise last
