@@ -152,14 +152,15 @@ class KosisClient:
         return row
 
 
-def _fetch_by_year(client, table, prd_se, num_periods, attempts=2, pause=1.2, sweeps=4):
+def _fetch_by_year(client, table, prd_se, num_periods, attempts=2, pause=1.2, sweeps=2):
     # type: (KosisClient, KosisTable, Optional[str], int, int, float, int) -> List[dict]
     """연도별 개별 수집(다년 백필). 대량 호출이 objL 오탐으로 실패하는 표
-    (종합·전기)용 — 단년 요청(startPrdDe=endPrdDe)은 작지만 **단년에서도
-    objL 오탐이 간헐 발생**하므로, 아직 못 받은 연도를 sweeps회 반복 재시도한다.
+    (종합·전기)용.
 
-    최신 연도를 newEstPrdCnt=1로 파악한 뒤 그 연도부터 num_periods개 연도를 대상으로,
-    성공한 연도는 건너뛰고 실패한 연도만 다음 sweep에서 다시 시도한다.
+    최신 연도를 newEstPrdCnt=1로 파악한 뒤 그 연도부터 num_periods개 연도를 각각
+    단년 조회(startPrdDe=endPrdDe)한다. 일부 연도는 KOSIS가 결정적으로 거부하기도
+    하므로(항목코드가 연도별로 다른 경우) sweeps회만 가볍게 재시도하고, 끝에
+    남은 연도는 범위 조회 한 번으로 만회 시도한다. 못 받은 연도는 건너뛴다.
     """
     import time
 
@@ -172,8 +173,8 @@ def _fetch_by_year(client, table, prd_se, num_periods, attempts=2, pause=1.2, sw
     by_year = {}                                  # 'YYYY' -> rows
     for r in latest:
         by_year.setdefault(str(r.get("PRD_DE", "")), []).append(r)
-
     want = [latest_year - k for k in range(num_periods)]   # 최신 포함 num_periods개
+
     for sweep in range(sweeps):
         missing = [y for y in want if str(y) not in by_year]
         if not missing:
@@ -190,6 +191,23 @@ def _fetch_by_year(client, table, prd_se, num_periods, attempts=2, pause=1.2, sw
                     logger.warning("[KOSIS] %s %d년 sweep%d/%d 시도%d 실패: %s",
                                    table.key, y, sweep + 1, sweeps, i + 1, e)
                     time.sleep(pause)
+
+    # 남은 연도: 범위 조회 한 번으로 만회 시도 (단년은 거부되어도 범위는 될 수 있음)
+    missing = [y for y in want if str(y) not in by_year]
+    if missing:
+        lo, hi = min(missing), max(missing)
+        try:
+            rows = client.fetch_table(table, prd_se=prd_se,
+                                      start_prd=str(lo), end_prd=str(hi))
+            for r in rows:
+                y = str(r.get("PRD_DE", ""))
+                if y.isdigit():
+                    by_year.setdefault(y, []).append(r)
+            if rows:
+                logger.info("[KOSIS] %s 범위 폴백 %d~%d: %d행", table.key, lo, hi, len(rows))
+        except (KosisError, requests.RequestException) as e:
+            logger.warning("[KOSIS] %s 범위 폴백 %d~%d 실패(연도 건너뜀): %s",
+                           table.key, lo, hi, e)
 
     combined = [r for rows in by_year.values() for r in rows]
     logger.info("[KOSIS] %s 연도별 폴백: %d/%d개 연도 %d행",
