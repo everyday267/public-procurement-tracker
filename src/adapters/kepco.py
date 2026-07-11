@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from datetime import date, timedelta
 from typing import Iterator, Optional
 
@@ -141,15 +142,8 @@ class KEPCOAdapter(BaseProcurementAdapter):
         """
         failed = []
         for begin, end in self._date_chunks(since, until):
-            try:
-                rows = self._get({
-                    "noticeBeginDate": begin.strftime("%Y%m%d"),
-                    "noticeEndDate":   end.strftime("%Y%m%d"),
-                })
-            except (requests.ConnectionError, requests.Timeout):
-                # 재시도로도 복구 못한 커넥션 리셋/타임아웃 → 이 창만 스킵.
-                # (403 등 HTTP 오류는 어댑터 설정 문제이므로 그대로 올린다.)
-                logger.exception("[KEPCO] 공고 %s~%s 조회 실패 — 이 구간 스킵", begin, end)
+            rows = self._fetch_chunk(begin, end)
+            if rows is None:
                 failed.append((begin, end))
                 continue
             logger.info("[KEPCO] 공고 %s~%s: %d건", begin, end, len(rows))
@@ -157,6 +151,29 @@ class KEPCOAdapter(BaseProcurementAdapter):
         if failed:
             logger.error("[KEPCO] 조회 실패 구간 %d개 (부분 수집): %s",
                          len(failed), ", ".join("%s~%s" % (b, e) for b, e in failed))
+
+    def _fetch_chunk(self, begin: date, end: date, attempts: int = 3):
+        """한 90일 창을 조회. bigdata의 일시적 장애(커넥션 리셋·타임아웃·빈/비JSON
+        응답)는 몇 차례 재시도 후에도 실패하면 None을 반환해 상위에서 스킵하게 한다.
+        인증 오류 등 '오류 응답'은 설정 문제이므로 그대로 예외를 올린다."""
+        params = {
+            "noticeBeginDate": begin.strftime("%Y%m%d"),
+            "noticeEndDate":   end.strftime("%Y%m%d"),
+        }
+        for i in range(attempts):
+            try:
+                return self._get(params)
+            except (requests.ConnectionError, requests.Timeout):
+                pass  # _get 내부 재시도로도 실패 → 창 단위로 한 번 더
+            except RuntimeError as e:
+                # 빈/비JSON 응답도 bigdata 일시 장애 → 재시도. '오류 응답'은 전파.
+                if "비JSON" not in str(e):
+                    raise
+            if i < attempts - 1:
+                time.sleep(REQUEST_INTERVAL * (i + 1))
+        logger.error("[KEPCO] 공고 %s~%s 조회 실패(%d회 재시도) — 이 구간 스킵",
+                     begin, end, attempts)
+        return None
 
     def fetch_awards(self, since: date, until: date) -> Iterator[dict]:
         """낙찰결과 — 본 API 미제공 (명세 확정). G2B 계약정보로 보완한다."""

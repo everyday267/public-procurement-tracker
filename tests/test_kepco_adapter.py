@@ -136,14 +136,35 @@ def test_fetch_notices_404_treated_as_empty(adapter):
 
 
 def test_fetch_notices_skips_failed_chunk(adapter):
-    """한 90일 창이 재시도로도 실패하면(커넥션 리셋/타임아웃) 그 창만 스킵하고
+    """한 90일 창이 재시도(3회)로도 커넥션 리셋이면 그 창만 스킵하고
     나머지 창은 계속 수집해야 한다 — bigdata 간헐 장애에 부분 수집이라도 회수."""
     import requests as _rq
-    # 1/1~6/30 = 3개 창. 첫 창 커넥션 리셋 → 스킵, 나머지 정상 수집.
-    with patch.object(adapter, "_get",
-                      side_effect=[_rq.ConnectionError("reset"), [{"no": "K2"}], []]):
+    # 1/1~6/30 = 3개 창. 첫 창은 3회 모두 리셋 → 스킵, 나머지 정상 수집.
+    ce = _rq.ConnectionError("reset")
+    with patch("src.adapters.kepco.time.sleep"), patch.object(
+            adapter, "_get", side_effect=[ce, ce, ce, [{"no": "K2"}], []]):
         rows = list(adapter.fetch_notices(date(2026, 1, 1), date(2026, 6, 30)))
     assert rows == [{"no": "K2"}]
+
+
+def test_fetch_notices_retries_then_recovers_chunk(adapter):
+    """빈/비JSON 응답(RuntimeError)도 재시도 대상 — 재시도 중 성공하면 수집."""
+    with patch("src.adapters.kepco.time.sleep"), patch.object(
+            adapter, "_get",
+            side_effect=[RuntimeError("KEPCO API 비JSON 응답: "), [{"no": "K9"}],
+                         [], []]):
+        rows = list(adapter.fetch_notices(date(2026, 1, 1), date(2026, 3, 31)))
+    # 1/1~3/31 = 1개 창: 1차 비JSON 실패 → 2차 성공
+    assert rows == [{"no": "K9"}]
+
+
+def test_fetch_notices_error_payload_raises(adapter):
+    """'오류 응답'(인증 실패 등)은 스킵하지 않고 그대로 올려 원인을 노출한다."""
+    with patch("src.adapters.kepco.time.sleep"), patch.object(
+            adapter, "_get",
+            side_effect=RuntimeError("KEPCO API 오류 응답: INVALID KEY")):
+        with pytest.raises(RuntimeError, match="오류 응답"):
+            list(adapter.fetch_notices(date(2026, 1, 1), date(2026, 3, 31)))
 
 
 def test_fetch_notices_other_http_error_raises(adapter):
