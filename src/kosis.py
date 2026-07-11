@@ -510,12 +510,17 @@ def main():
         logger.info("    → 공사규모 하한(억): %s",
                     [(b["scale"], b["lower_eok"]) for b in brackets])
         logger.info("    → 100억↑로 분류된 구간: %s", ge or "(없음)")
-        allx = ge_threshold_amount(conn, table.industry, min_eok=100)
+        # 다년 데이터가 섞일 수 있으므로 최신 연도만 표시(연도별 합산 금지).
+        years = sorted({r["prd_de"] for r in
+                        scale_agency_summary(conn, table.industry) if r["prd_de"]})
+        y = years[-1] if years else None
+        allx = ge_threshold_amount(conn, table.industry, min_eok=100, year=y)
         pub = ge_threshold_amount(conn, table.industry, min_eok=100,
-                                  agencies=PUBLIC_AGENCIES)
-        logger.info("    → 스킴=%s / 100억↑ 금액합계(연간): 전체(합계행 제외) %s원 · 공공 %s원",
-                    allx["scheme"], "{:,.0f}".format(allx["krw"]),
-                    "{:,.0f}".format(pub["krw"]))
+                                  agencies=PUBLIC_AGENCIES, year=y)
+        logger.info("    → 스킴=%s / %s년 100억↑ 금액: 전체(합계행 제외) %s원 · 공공 %s원 "
+                    "(수집 연도수=%d)",
+                    allx["scheme"], y, "{:,.0f}".format(allx["krw"]),
+                    "{:,.0f}".format(pub["krw"]), len(years))
     return 0
 
 
