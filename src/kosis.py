@@ -60,9 +60,9 @@ KOSIS_TABLES: Dict[str, KosisTable] = {
         itm_ids=("16365AAD2", "16365AAB6"), obj_levels=3, industry="종합",
         label="종합건설업 공사규모별 월별 발주기관별 계약실적"),
     "spec": KosisTable(
-        key="spec", org_id="366", tbl_id="TX_36601_A089",
-        itm_ids=("16366AAA0", "16366AAA1"), obj_levels=3, industry="전문",
-        label="전문건설업 공사규모별 월 및 발주기관별 계약실적"),
+        key="spec", org_id="366", tbl_id="TX_36601_A083",
+        itm_ids=("16001", "16366AAA2"), obj_levels=2, industry="전문",
+        label="전문건설업 공사규모별 발주기관별 계약실적 (100억↑ 구간 포함)"),
     "elec": KosisTable(
         key="elec", org_id="370", tbl_id="DT_370001_A010",
         itm_ids=("T001", "16370AAD3"), obj_levels=2, industry="전기",
@@ -400,7 +400,9 @@ def ge_threshold_amount(conn, industry, min_eok=100, agencies=None, month=None, 
     agencies 지정 시 해당 발주기관만, year 지정 시 해당 연도만. 금액 항목만.
     반환: {krw, brackets, agencies, scheme}.
     """
-    rows = [r for r in scale_agency_summary(conn, industry, itm_nm_like="금액", month=month)
+    # 금액 항목은 항목명이 아니라 '원 환산 가능한 단위'(krw not None)로 식별한다
+    # (표마다 항목명이 '금액'/'계약액' 등으로 달라도 안전).
+    rows = [r for r in scale_agency_summary(conn, industry, month=month)
             if r["krw"] is not None and (year is None or r["prd_de"] == year)]
     if agencies is not None:
         rows = [r for r in rows if r["agency"] in agencies]
@@ -429,7 +431,7 @@ def ge_threshold_amount(conn, industry, min_eok=100, agencies=None, month=None, 
 def ge100_public_by_year(conn, industry, min_eok=100):
     # type: (object, str, float) -> Dict[str, float]
     """연도별 '공공 발주 × ≥min_eok억' 금액(원). {year: krw}."""
-    years = {r["prd_de"] for r in scale_agency_summary(conn, industry, itm_nm_like="금액")}
+    years = {r["prd_de"] for r in scale_agency_summary(conn, industry)}
     out = {}
     for y in years:
         amt = ge_threshold_amount(conn, industry, min_eok=min_eok,

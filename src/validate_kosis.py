@@ -7,14 +7,13 @@
 
 대조 대상 (연도별):
   우리 DB 100억↑ 공공 계약액(비교가능 모집단, 전기·정보통신·소방 제외)
-    vs KOSIS 종합건설업 100억↑ 공공 계약액 (gen, 범위형 구간 합산)
+    vs KOSIS 종합+전문 100억↑ 공공 계약액 (gen+spec, 범위형 구간 합산)
 
 해석 주의:
-  - 우리 모집단은 종합+전문 혼합인데 KOSIS 전문(spec)은 최대 구간이 '50억이상'
-    이라 100억↑ 구간이 없다(전문 100억↑는 KOSIS로 측정 불가). 따라서 우리 값은
-    KOSIS 종합 100억↑에 '전문 100억↑'만큼 더 크게 나오는 게 정상 → ratio ≳ 1.
+  - 우리 모집단(종합+전문)과 KOSIS 종합+전문을 맞춘 apples-to-apples 대조다
+    (전문 표를 100억↑ 구간이 있는 TX_36601_A083으로 교체).
   - KOSIS 계약통계는 발주자 신고 기반 연간 집계라 우리 계약일 기준과 시점·정의가
-    다르다. 정밀 일치가 아니라 자릿수·추세 확인용이다.
+    다르다. 정밀 일치가 아니라 자릿수·추세 확인용이다(설계 §4.1).
 
 플래그(넓은 밴드):
   RATIO_LOW  : ratio < 0.5  → 대량 미수집 의심
@@ -33,8 +32,8 @@ from .validate_kiscon import _UNIVERSE_SQL, _STRICT_EXCLUDE
 logger = logging.getLogger("validate_kosis")
 
 RATIO_LOW, RATIO_HIGH = 0.5, 3.0
-# KOSIS 종합 대조를 위한 기본 산업 (전문은 100억↑ 구간 부재, 전기는 대상외)
-PRIMARY_INDUSTRY = "종합"
+# 대조에 합산할 산업 (전기는 KISCON 대상외라 제외 — 참고치로만 리포트)
+COMPARISON_INDUSTRIES = ("종합", "전문")
 
 
 def our_annual_public_100eok(conn, strict=True):
@@ -49,7 +48,7 @@ def our_annual_public_100eok(conn, strict=True):
     return {r["y"]: int(r["krw"]) for r in cur.fetchall() if r["y"]}
 
 
-def reconcile(ours, kosis_by_year, industry=PRIMARY_INDUSTRY):
+def reconcile(ours, kosis_by_year, industry="종합+전문"):
     # type: (Dict[str, int], Dict[str, float], str) -> List[dict]
     """연도별 recon 행 생성. 대상 연도는 우리 DB에 계약이 있는 연도."""
     rows = []
@@ -70,8 +69,8 @@ def reconcile(ours, kosis_by_year, industry=PRIMARY_INDUSTRY):
             "ours_krw": ours_krw,
             "kosis_krw": int(kosis_krw) if kosis_krw is not None else None,
             "ratio": ratio, "flag": flag,
-            "detail": "우리(종합+전문 100억↑ 공공) vs KOSIS 종합 100억↑ 공공. "
-                      "우리는 전문 100억↑ 포함이라 ratio≳1 정상.",
+            "detail": "우리 100억↑ 공공(종합+전문) vs KOSIS 종합+전문 100억↑ 공공. "
+                      "커버리지 ≈ ratio (1에 가까울수록 정합).",
         })
     return rows
 
@@ -93,9 +92,9 @@ def write_report(rows, ref, output_dir, label):
     csv_path.write_text("\n".join(csv_lines), encoding="utf-8-sig")
 
     md = ["# KOSIS 대조 리포트 ({})".format(label), "",
-          "연간 상한 sanity check — 우리 100억↑ 공공 계약액 vs KOSIS 종합 100억↑ 공공.",
+          "연간 상한 sanity check — 우리 100억↑ 공공 계약액 vs KOSIS 종합+전문 100억↑ 공공.",
           "정밀 일치가 아니라 자릿수·추세 확인용(설계 §4.1).", "",
-          "| 연도 | 우리(원) | KOSIS 종합(원) | ratio | flag |",
+          "| 연도 | 우리(원) | KOSIS 종합+전문(원) | ratio | flag |",
           "|---|---|---|---|---|"]
     for r in rows:
         md.append("| {} | {:,} | {} | {} | {} |".format(
@@ -124,13 +123,19 @@ def run(db_path, output_dir="output", strict=True):
         logger.warning("contracts에 비교가능 계약이 없습니다 — KOSIS 대조 생략")
         return 0
 
-    kosis_gen = ge100_public_by_year(conn, "종합")
-    rows = reconcile(ours, kosis_gen, industry="종합")
+    # KOSIS 종합+전문 100억↑ 공공 (연도별 합산)
+    per_industry = {ind: ge100_public_by_year(conn, ind)
+                    for ind in COMPARISON_INDUSTRIES}
+    combined = {}
+    for by_year in per_industry.values():
+        for y, v in by_year.items():
+            combined[y] = combined.get(y, 0.0) + (v or 0.0)
+    rows = reconcile(ours, combined, industry="종합+전문")
     upsert_kosis_recon(conn, rows)
 
-    # 참고용: 산업별 100억↑ 공공 (있는 것만)
+    # 참고용: 산업별 100억↑ 공공 (전기 포함, 있는 것만)
     ref = {}
-    for ind in ("종합", "전기"):
+    for ind in ("종합", "전문", "전기"):
         by_year = ge100_public_by_year(conn, ind)
         if any(by_year.values()):
             ref[ind] = by_year
