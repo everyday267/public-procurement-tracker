@@ -125,10 +125,12 @@ def main():
         print("  단위(UNIT_NM): {}".format(sorted(units)))
         for obj, members in dims.items():
             ms = sorted(m for m in members if m)
-            scale = "  ← 공사규모(금액구간)?" if any(
-                k in obj for k in ("규모", "금액")) else ""
+            scale = "  ← 공사규모(금액구간)?" if "규모" in obj else ""
             agency = "  ← 발주기관?" if "발주" in obj else ""
-            print("  분류축 [{}]{}{}: {}".format(obj, scale, agency, ms[:12]))
+            month = "  ← 월별(분류축!)" if "월" in obj else ""
+            # 공사규모 구간 전체를 출력한다 (100억↑ 구간 라벨 확인이 핵심)
+            print("  분류축 [{}]{}{}{} ({}개): {}".format(
+                obj, scale, agency, month, len(ms), ms))
 
     print("\n===== 완료 =====")
     return 0

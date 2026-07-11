@@ -51,15 +51,18 @@ class KosisTable:
 
 
 # 사용자 제공 3개 URL의 파라미터를 그대로 등록한다.
+# 축 구성(probe 실측): 종합/전문 = 발주기관별(C1)·공사규모별(C2)·월별(C3),
+# 전기 = 공사규모별(C1)·발주기관별(C2). itm_nm·단위는 응답에서 읽는다
+# (종합 금액=십억원, 전문·전기 금액=백만원 / 건수=건).
 KOSIS_TABLES: Dict[str, KosisTable] = {
     "gen": KosisTable(
         key="gen", org_id="365", tbl_id="DT_365001_A072",
         itm_ids=("16365AAD2", "16365AAB6"), obj_levels=3, industry="종합",
-        label="종합건설업 공사규모별 발주기관별 계약실적"),
+        label="종합건설업 공사규모별 월별 발주기관별 계약실적"),
     "spec": KosisTable(
         key="spec", org_id="366", tbl_id="TX_36601_A089",
         itm_ids=("16366AAA0", "16366AAA1"), obj_levels=3, industry="전문",
-        label="전문건설업 공사규모별 발주기관별 계약실적"),
+        label="전문건설업 공사규모별 월 및 발주기관별 계약실적"),
     "elec": KosisTable(
         key="elec", org_id="370", tbl_id="DT_370001_A010",
         itm_ids=("T001", "16370AAD3"), obj_levels=2, industry="전기",
@@ -177,9 +180,76 @@ def collect_kosis(conn, client, tables=None, prd_se=None, num_periods=10):
 # 저장 데이터 요약 (분류축 매핑 확인용)                                       #
 # ---------------------------------------------------------------------- #
 
-# 분류축 이름 판별 키워드 (표마다 축 순서가 달라 이름으로 찾는다)
-_SCALE_KEYWORDS = ("규모", "금액", "도급")
-_AGENCY_KEYWORDS = ("발주", "발주자", "발주기관", "주체")
+# 분류축 이름 판별 키워드 (표마다 축 순서가 달라 이름으로 찾는다).
+# 실측(probe) 확인: 종합/전문 = 발주기관별(C1)·공사규모별(C2)·월별(C3),
+# 전기 = 공사규모별(C1)·발주기관별(C2). 월별은 기간이 아니라 분류축이므로
+# 합계와 월을 함께 더하면 2배 중복된다 → 월 축을 별도 식별해 처리한다.
+_SCALE_KEYWORDS = ("규모",)
+_AGENCY_KEYWORDS = ("발주",)
+_MONTH_KEYWORDS = ("월",)
+
+# 월 축의 "전체" 멤버 (표마다 표기가 다르다). 연간 대조 시 이 값만 사용한다.
+_MONTH_TOTAL = ("합계", "계", "전체")
+
+# 금액 단위 → 원(KRW) 환산 계수. 표마다 단위가 다르다(종합=십억원, 전문·전기=백만원).
+_UNIT_TO_KRW = {
+    "원": 1, "천원": 1_000, "만원": 10_000, "백만원": 1_000_000,
+    "천만원": 10_000_000, "억원": 100_000_000, "십억원": 1_000_000_000,
+    "백억원": 10_000_000_000, "천억원": 100_000_000_000, "조원": 1_000_000_000_000,
+}
+
+
+def amount_to_krw(dt, unit_nm):
+    # type: (Optional[float], Optional[str]) -> Optional[float]
+    """금액 dt를 unit_nm 기준으로 원(KRW)으로 환산. 건수 등 비금액 단위는 None."""
+    if dt is None:
+        return None
+    factor = _UNIT_TO_KRW.get((unit_nm or "").strip())
+    return dt * factor if factor else None
+
+
+# 공사규모 구간 라벨의 하한(단위: 억원) 추출용. "100억원이상"·"100억~300억"·
+# "4000만원 미만"·"5백만원이상" 등에서 첫 수치+단위를 하한으로 읽는다.
+_EOK_UNIT = {"조": 10_000.0, "천억": 1_000.0, "백억": 100.0, "억": 1.0,
+             "천만": 0.1, "백만": 0.01, "십만": 0.001, "만": 0.0001}
+# 긴 단위(천억·백억·천만·백만·십만) 우선 매칭
+_UNIT_RE = r"(조|천억|백억|억|천만|백만|십만|만)"
+
+
+def scale_lower_bound_eok(label):
+    # type: (Optional[str]) -> Optional[float]
+    """공사규모 라벨의 하한을 억원 단위로 반환. 합계/미상은 None, '미만'만 있는
+    최하 구간은 0.
+
+    범위 라벨은 하한(앞 값)을 읽는다 — '50~100억'·'50억~100억'→50, '100억~300억'→100.
+    ('이상'/'미만' 단일 구간: '100억원이상'→100, '4000만원미만'→0)
+    """
+    import re
+    if label is None:
+        return None
+    s = str(label).replace(" ", "").replace(",", "")
+    if any(t in s for t in ("합계", "소계", "계")) and not any(c.isdigit() for c in s):
+        return None
+
+    if "~" in s:
+        # 범위: 앞 값이 하한. 단위는 앞쪽에 없으면 전체에서 찾는다(예: '50~100억').
+        left = s.split("~")[0]
+        mnum = re.search(r"\d+(?:\.\d+)?", left)
+        if not mnum:
+            return None
+        munit = re.search(_UNIT_RE, left) or re.search(_UNIT_RE, s)
+        if not munit:
+            return None
+        return float(mnum.group()) * _EOK_UNIT[munit.group(1)]
+
+    m = re.search(r"(\d+(?:\.\d+)?)\s*" + _UNIT_RE, s)
+    if not m:
+        return None
+    value = float(m.group(1)) * _EOK_UNIT[m.group(2)]
+    # '미만'만 있는 최하 구간(예: 4000만원미만)은 하한 0
+    if "미만" in s and "이상" not in s and "초과" not in s:
+        return 0.0
+    return value
 
 
 def dimension_labels(conn, industry=None):
@@ -209,12 +279,33 @@ def _match_dim(obj, keywords):
     return bool(obj) and any(k in obj for k in keywords)
 
 
-def scale_agency_summary(conn, industry, itm_nm_like=None):
-    # type: (object, str, Optional[str]) -> List[dict]
+def _roles(row):
+    # type: (dict) -> tuple
+    """행의 C1~C3에서 (공사규모 멤버, 발주기관 멤버, 월 멤버)를 이름으로 식별."""
+    scale = agency = month = None
+    for n in (1, 2, 3):
+        obj = row.get("c{}_obj".format(n))
+        nm = row.get("c{}_nm".format(n))
+        if not obj:
+            continue
+        if _match_dim(obj, _SCALE_KEYWORDS) and scale is None:
+            scale = nm
+        elif _match_dim(obj, _AGENCY_KEYWORDS) and agency is None:
+            agency = nm
+        elif _match_dim(obj, _MONTH_KEYWORDS) and month is None:
+            month = nm
+    return scale, agency, month
+
+
+def scale_agency_summary(conn, industry, itm_nm_like=None, month=None):
+    # type: (object, str, Optional[str], Optional[str]) -> List[dict]
     """공사규모 × 발주기관 피벗. 축은 이름으로 자동 식별한다.
 
-    반환: [{prd_de, itm_nm, unit_nm, scale, agency, dt}]. 축을 못 찾으면 빈 리스트
-    (표 구조가 예상과 다름 → probe 필요 신호).
+    month 처리 (종합·전문은 월별 축이 있어 합계+월이 함께 저장됨):
+      - None  : 연간 합계만 (월 합계 행만) — 중복 없음, 대조 기본값
+      - '1월' : 해당 월만
+      - '*'   : 월 필터 없음 (행 그대로, 중복 주의)
+    금액 항목이면 krw(원 환산)을 함께 반환한다.
     """
     q = "SELECT * FROM kosis_stats WHERE industry = ?"
     args = [industry]
@@ -224,21 +315,56 @@ def scale_agency_summary(conn, industry, itm_nm_like=None):
     rows = [dict(r) for r in conn.execute(q, args).fetchall()]
     out = []
     for r in rows:
-        scale = agency = None
-        for n in (1, 2, 3):
-            obj = r.get("c{}_obj".format(n))
-            nm = r.get("c{}_nm".format(n))
-            if _match_dim(obj, _SCALE_KEYWORDS) and scale is None:
-                scale = nm
-            elif _match_dim(obj, _AGENCY_KEYWORDS) and agency is None:
-                agency = nm
+        scale, agency, mon = _roles(r)
+        if mon is not None:                      # 월별 축이 있는 표(종합·전문)
+            if month is None:
+                if mon not in _MONTH_TOTAL:
+                    continue                     # 연간 합계 행만
+            elif month != "*" and mon != month:
+                continue
         if scale is None and agency is None:
             continue
         out.append({
             "prd_de": r["prd_de"], "itm_nm": r["itm_nm"], "unit_nm": r["unit_nm"],
-            "scale": scale, "agency": agency, "dt": r["dt"],
+            "scale": scale, "agency": agency, "month": mon,
+            "dt": r["dt"], "krw": amount_to_krw(r["dt"], r["unit_nm"]),
         })
     return out
+
+
+def scale_brackets(conn, industry):
+    # type: (object, str) -> List[dict]
+    """저장된 공사규모 구간과 그 하한(억원)을 정렬해 반환 — 구간 분류 검증용.
+    반환: [{scale, lower_eok}] (lower_eok 오름차순, None은 뒤로)."""
+    seen = {}
+    for r in scale_agency_summary(conn, industry, month="*"):
+        s = r["scale"]
+        if s is not None and s not in seen:
+            seen[s] = scale_lower_bound_eok(s)
+    return sorted(({"scale": s, "lower_eok": lb} for s, lb in seen.items()),
+                  key=lambda x: (x["lower_eok"] is None, x["lower_eok"] or 0))
+
+
+def ge_threshold_amount(conn, industry, min_eok=100, agencies=None, month=None):
+    # type: (object, str, float, Optional[set], Optional[str]) -> dict
+    """공사규모 하한 ≥ min_eok억 구간의 금액(원) 합계.
+
+    반환: {'krw': 합계원, 'brackets': 포함된 구간 라벨 set, 'agencies': 집계 발주기관 set}.
+    agencies 지정 시 해당 발주기관 멤버만 합산(예: 공공 집합). None이면 전체.
+    금액 항목(krw is not None)만 대상으로 한다.
+    """
+    total = 0.0
+    brackets, used_agencies = set(), set()
+    for r in scale_agency_summary(conn, industry, itm_nm_like="금액", month=month):
+        lb = scale_lower_bound_eok(r["scale"])
+        if lb is None or lb < min_eok or r["krw"] is None:
+            continue
+        if agencies is not None and r["agency"] not in agencies:
+            continue
+        total += r["krw"]
+        brackets.add(r["scale"])
+        used_agencies.add(r["agency"])
+    return {"krw": total, "brackets": brackets, "agencies": used_agencies}
 
 
 def main():
@@ -269,9 +395,21 @@ def main():
 
     for key, table in KOSIS_TABLES.items():
         labels = dimension_labels(conn, industry=table.industry)
-        if labels:
-            logger.info("[%s] 분류축: %s", table.industry,
-                        {obj: mem[:5] for obj, mem in labels.items()})
+        if not labels:
+            continue
+        logger.info("[%s] 분류축:", table.industry)
+        for obj, mem in labels.items():
+            logger.info("    %s (%d): %s", obj, len(mem), mem)
+        # 100억↑ 구간 분류 결과 — 사용자 검증용
+        brackets = scale_brackets(conn, table.industry)
+        ge = [b["scale"] for b in brackets
+              if b["lower_eok"] is not None and b["lower_eok"] >= 100]
+        logger.info("    → 공사규모 하한(억): %s",
+                    [(b["scale"], b["lower_eok"]) for b in brackets])
+        logger.info("    → 100억↑로 분류된 구간: %s", ge or "(없음)")
+        amt = ge_threshold_amount(conn, table.industry, min_eok=100)
+        logger.info("    → 100억↑ 금액합계(전체 발주기관, 연간): %s 원",
+                    "{:,.0f}".format(amt["krw"]))
     return 0
 
 
