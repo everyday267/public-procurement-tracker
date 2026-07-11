@@ -46,6 +46,43 @@ def test_flags_failed_run(db_path):
     assert "실행 실패" in problems[0]["title"]
 
 
+def test_kiscon_recon_flag_becomes_problem(db_path):
+    path, conn = db_path
+    conn.execute(
+        "INSERT INTO kiscon_recon (ym, level, basis, ratio, flag, detail) "
+        "VALUES ('2026-06','L0_AMT','lag_adjusted',1.2,'RATIO_GE_1','이중계상 의심')"
+    )
+    conn.commit()
+    problems = find_problems(path)
+    assert len(problems) == 1
+    assert problems[0]["title"].startswith("[kiscon-validation] 2026-06")
+    assert "RATIO_GE_1" in problems[0]["title"]
+    assert problems[0]["label"] == "kiscon-validation"
+
+
+def test_kiscon_recon_without_flag_is_silent(db_path):
+    path, conn = db_path
+    conn.execute(
+        "INSERT INTO kiscon_recon (ym, level, basis, ratio, flag) "
+        "VALUES ('2026-06','L0_AMT','lag_adjusted',0.4,NULL)"
+    )
+    conn.commit()
+    assert find_problems(path) == []
+
+
+def test_kiscon_recon_missing_table_no_crash(tmp_path):
+    # kiscon_recon 테이블이 없는 구버전 DB에서도 죽지 않아야 한다
+    import sqlite3 as _sqlite3
+    old_db = str(tmp_path / "old.db")
+    conn = _sqlite3.connect(old_db)
+    conn.execute("CREATE TABLE source_runs (run_id TEXT PRIMARY KEY, source TEXT, "
+                 "started_at TEXT, ended_at TEXT, status TEXT, fetched_count INT, "
+                 "filtered_count INT, error_message TEXT)")
+    conn.commit()
+    conn.close()
+    assert find_problems(old_db) == []
+
+
 def test_flags_schema_drift(db_path):
     path, conn = db_path
     conn.execute(

@@ -70,9 +70,88 @@ python -m src.run_monthly --since 2026-06-01 --until 2026-06-07 --sources g2b_op
 | `LH_API_KEY` | LH e-Bid 자체 OpenAPI |
 | `KEPCO_API_KEY` | 한전 전자입찰계약정보 OpenAPI (공공데이터포털 발급) |
 | `EX_API_KEY` | 한국도로공사 전자조달 계약공개현황 OpenAPI (data.ex.co.kr 발급) |
+| `KISCON_API_KEY` | 키스콘 건설공사대장 통보 통계 OpenAPI (공공데이터포털 발급, KISCON 대조 검증용) |
+| `KOSIS_API_KEY` | KOSIS 건설업 통계 OpenAPI (kosis.kr 발급, 종합·전문·전기 공사규모별 계약실적) |
 
 시크릿이 Settings → Secrets and variables → Actions에 등록되어 있어야
 `monthly-collect` / `quarterly-backfill` 워크플로우가 정상 동작합니다.
+
+## KISCON 대조 검증 (검증 층 2)
+
+월간 수집 후 `validate_kiscon`이 우리 계약 합계를 KISCON(건설공사대장 통보 통계,
+`ConStatInfoSvc`) 공공×원도급 집계와 대조합니다. 우리 DB는 100억↑ 부분집합이므로
+`ratio = 우리 ÷ KISCON < 1`이 불변식이며, 위반(`RATIO_GE_1`)·밴드 이탈(`OUT_OF_BAND`)
+등의 플래그는 `kiscon_recon` 테이블에 기록되고 schema-monitor 워크플로우가
+`kiscon-validation` 라벨 이슈로 등록합니다.
+
+```bash
+export KISCON_API_KEY=...
+python -m src.validate_kiscon --db procurement.db --month 2026-06
+python -m src.validate_kiscon --db procurement.db --skip-fetch   # 수집 생략, 대조만
+```
+
+- 산출물: `output/kiscon_recon_{label}.csv` / `.md` (monthly-collect 로그에도 전문 출력)
+- 건별 대조(L2)·모집단 추정은 건별 리스트 오퍼레이션 확정 후 활성화됩니다:
+  `scripts/probe_kiscon.py`를 probe_script로 디스패치해 엔드포인트를 확정하고,
+  리포지토리 변수 `KISCON_RECORDS_OP`에 오퍼레이션명을 등록하면 수집이 켜집니다.
+
+## KOSIS 건설업 통계 (검증 보조 소스)
+
+KISCON `StatAmt`에 없던 **공사규모(금액구간)** 축을 KOSIS 건설협회 통계에서
+보완합니다. 종합·전문·전기 건설업의 공사규모별 × 발주기관별 계약실적을
+`kosis_stats` 테이블에 long-format으로 저장합니다 (표마다 분류축 순서가 달라
+축이름 `Cn_OBJ_NM`을 함께 보관하고 이름으로 매핑).
+
+| 표 | orgId / tblId | 항목 |
+|---|---|---|
+| 종합건설업 | 365 / DT_365001_A072 | 계약액·계약건수 |
+| 전문건설업 | 366 / TX_36601_A089 | 계약액·계약건수 |
+| 전기공사업 | 370 / DT_370001_A010 | 공사건수·실적액 |
+
+```bash
+export KOSIS_API_KEY=...
+python -m src.kosis --db procurement.db                 # 3종 전체 수집 + 축 요약
+python -m src.kosis --db procurement.db --tables gen --prd-se M --periods 12
+python -m src.kosis --db procurement.db --skip-fetch    # 저장분 축 요약만
+```
+
+> **⚠️ 네트워크 제약 (실측 확인됨):** kosis.kr은 **해외 IP의 443 연결을
+> 차단**한다. GitHub 호스티드 러너(미국)에서 probe 실행 시 3개 표 모두
+> `ConnectTimeout`으로 실패했다 (data.go.kr 게이트웨이는 러너에서 열려 KISCON은
+> 정상). 따라서 KOSIS 수집은 **한국 IP 경로**가 필요하다:
+> - **로컬 실행**: 한국 소재 PC/서버에서 위 CLI를 직접 실행 (키·코드 그대로 동작)
+> - **KR 프록시**: 한국 소재 HTTPS 프록시를 `KOSIS_HTTPS_PROXY` 시크릿으로
+>   등록하면 monthly-collect의 KOSIS 스텝이 자동으로 그걸 통해 호출한다
+>   (requests가 `HTTPS_PROXY` 환경변수를 자동 사용). 로컬에서도
+>   `HTTPS_PROXY=http://<kr-proxy> python -m src.kosis ...`로 동일하게 가능.
+> - **KR self-hosted 러너**: 한국 소재 러너를 수집 job에 지정
+
+- 표별 분류축(어느 C가 공사규모/발주기관인지)·100억↑ 구간 존재 여부는
+  `scripts/probe_kosis.py`를 probe_script로 디스패치해 실측 확인합니다
+  (위 KR 경로 확보 후 — 미국 러너에서는 타임아웃).
+- 저장 후 `scale_agency_summary()`가 공사규모 × 발주기관 피벗을 이름 기반으로
+  산출합니다. `python -m src.validate_kosis`가 **우리 100억↑ 공공 계약액 ↔ KOSIS
+  종합 100억↑ 공공 계약액**을 연도별로 대조해 `kosis_recon` 테이블·리포트를 남깁니다.
+
+**실측으로 확인된 표별 특성 (2024년 기준):**
+
+| 산업 | 공사규모 구간 | 100억↑ | 발주기관(공공) |
+|---|---|---|---|
+| 종합(365) | 범위형(`100~200억미만`…`1000억이상`) | ✅ 있음 (연 176.98조) | 정부기관·지자체·공공단체·공기업 |
+| 전문(366) | `TX_36601_A083` (100억↑ 구간 포함 표) | ✅ 있음 | 동일 |
+| 전기(370) | `N억이상` 라벨이나 값은 **배타적 구간**(disjoint) | ✅ 있음 (연 14.04조) | +한국전력 |
+
+- **월별이 분류축(C3)** 이라 `합계+월` 이중계상 방지 처리(연간=월 합계만).
+- **구간 스킴은 데이터로 판별**(`_detect_scheme`): 각 구간 합이 `합계`와 같으면
+  배타적(disjoint, 합산) · 훨씬 크면 중첩(cumulative, 단일 구간). 라벨(`N이상`)
+  추정 금지 — 전기는 라벨이 `이상`이지만 값이 배타적이라 disjoint로 잡힌다.
+- **공공 집합**: `{정부기관, 지방자치단체, 공공단체, 공기업}` (`kosis.PUBLIC_AGENCIES`).
+- 대조는 **종합+전문 합산 100억↑ 공공** 기준(우리 모집단과 apples-to-apples).
+  정밀 일치가 아닌 자릿수·추세 확인용(설계 §4.1).
+- **kosis.kr 대용량 호출이 간헐적으로 `objL 누락` 오탐 오류를 냄** → 표 단위
+  재시도 후 **연도별 개별 수집(`startPrdDe=endPrdDe`)으로 폴백**해 다년치를
+  확보(`--periods 10` 기본). 단년 요청은 작아 대체로 성공하므로 종합·전기도
+  10년치 백필된다(개별 연도 실패는 건너뜀).
 
 ## 디렉토리
 ```

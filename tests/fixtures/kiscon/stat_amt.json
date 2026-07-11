@@ -1,0 +1,47 @@
+{
+  "response": {
+    "header": {
+      "resultCode": "00",
+      "resultMsg": "NORMAL SERVICE"
+    },
+    "body": {
+      "numOfRows": 10,
+      "pageNo": 1,
+      "totalCount": 3,
+      "items": {
+        "item": [
+          {
+            "amt": 1250,
+            "areaCode": "11",
+            "areaName": "서울",
+            "baljuCode": "0",
+            "baljuGubun": "공공",
+            "dogubCode": "1",
+            "dogubGubun": "원도급",
+            "notiDate": "20260610"
+          },
+          {
+            "amt": "2,340",
+            "areaCode": "31",
+            "areaName": "경기",
+            "baljuCode": "0",
+            "baljuGubun": "공공",
+            "dogubCode": "1",
+            "dogubGubun": "원도급",
+            "notiDate": "20260610"
+          },
+          {
+            "amt": 87,
+            "areaCode": "39",
+            "areaName": "제주",
+            "baljuCode": "0",
+            "baljuGubun": "공공",
+            "dogubCode": "1",
+            "dogubGubun": "원도급",
+            "notiDate": "20260611"
+          }
+        ]
+      }
+    }
+  }
+}
