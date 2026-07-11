@@ -200,7 +200,8 @@ def test_fetch_table_resilient_per_year_backfill(client, monkeypatch):
                 "ITM_NM": "금액", "UNIT_NM": "백만원", "DT": "1", "ORG_ID": "365",
                 "TBL_ID": "DT_365001_A072"}
 
-    def fake(table, prd_se=None, num_periods=10, start_prd=None, end_prd=None):
+    def fake(table, prd_se=None, num_periods=10, start_prd=None, end_prd=None,
+             obj_levels=None):
         if start_prd is None:
             if num_periods == 1:
                 return [_row("2024")]                    # 최신 연도 파악
@@ -217,7 +218,8 @@ def test_fetch_by_year_skips_failing_years(client, monkeypatch):
     from src.kosis import _fetch_by_year
     monkeypatch.setattr(time, "sleep", lambda *_: None)
 
-    def fake(table, prd_se=None, num_periods=10, start_prd=None, end_prd=None):
+    def fake(table, prd_se=None, num_periods=10, start_prd=None, end_prd=None,
+             obj_levels=None):
         if start_prd is None:
             return [{"PRD_DE": "2024", "DT": "1"}]
         if start_prd == "2022":
@@ -225,8 +227,27 @@ def test_fetch_by_year_skips_failing_years(client, monkeypatch):
         return [{"PRD_DE": start_prd, "DT": "1"}]
 
     client.fetch_table = fake
-    out = _fetch_by_year(client, KOSIS_TABLES["gen"], None, 3, attempts=1)
+    out = _fetch_by_year(client, KOSIS_TABLES["gen"], None, 3)
     assert {r["PRD_DE"] for r in out} == {"2024", "2023"}   # 2022 실패 제외
+
+
+def test_fetch_by_year_recovers_with_more_obj_levels(client, monkeypatch):
+    # 'objL 누락' 연도를 objL 레벨을 늘려 만회 (종합 base=3 → 4에서 성공)
+    import time
+    from src.kosis import _fetch_by_year
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
+
+    def fake(table, prd_se=None, num_periods=10, start_prd=None, end_prd=None,
+             obj_levels=None):
+        if start_prd is None:
+            return [{"PRD_DE": "2024", "DT": "1"}]
+        if start_prd == "2023" and (obj_levels or table.obj_levels) < 4:
+            raise KosisError("필수요청변수값이 누락되었습니다. (objL)")  # base(3)엔 실패
+        return [{"PRD_DE": start_prd, "DT": "1"}]           # 레벨 4에서 성공
+
+    client.fetch_table = fake
+    out = _fetch_by_year(client, KOSIS_TABLES["gen"], None, 2)
+    assert {r["PRD_DE"] for r in out} == {"2024", "2023"}   # 레벨 증가로 2023 확보
 
 
 # ── 축 매핑 + 월별 중복 방지 ─────────────────────────────────────────────

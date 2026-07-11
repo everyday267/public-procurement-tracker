@@ -91,12 +91,14 @@ class KosisClient:
         self.output_fields = output_fields
         self.session = requests.Session()
 
-    def _params(self, table, prd_se, num_periods, start_prd, end_prd):
-        # type: (KosisTable, str, Optional[int], Optional[str], Optional[str]) -> dict
-        # objL1..objL8: 표의 분류 레벨 수만큼 ALL, 나머지는 빈 값.
+    def _params(self, table, prd_se, num_periods, start_prd, end_prd, obj_levels=None):
+        # type: (KosisTable, str, Optional[int], Optional[str], Optional[str], Optional[int]) -> dict
+        # objL1..objL8: 분류 레벨 수만큼 ALL, 나머지는 빈 값. obj_levels로 재정의 가능
+        # (일부 연도는 분류 레벨이 달라 'objL 누락' 오류가 나므로 레벨을 늘려 재시도).
+        levels = obj_levels if obj_levels is not None else table.obj_levels
         obj = {}
         for i in range(1, 9):
-            obj["objL{}".format(i)] = "ALL" if i <= table.obj_levels else ""
+            obj["objL{}".format(i)] = "ALL" if i <= levels else ""
         # itmId·objL·outputFields는 '+'(공백)로 구분 — requests가 공백을 인코딩한다.
         params = {
             "method": "getList",
@@ -117,10 +119,11 @@ class KosisClient:
             params["newEstPrdCnt"] = num_periods or 10
         return params
 
-    def fetch_table(self, table, prd_se=None, num_periods=10, start_prd=None, end_prd=None):
-        # type: (KosisTable, Optional[str], Optional[int], Optional[str], Optional[str]) -> List[dict]
+    def fetch_table(self, table, prd_se=None, num_periods=10, start_prd=None,
+                    end_prd=None, obj_levels=None):
+        # type: (KosisTable, Optional[str], Optional[int], Optional[str], Optional[str], Optional[int]) -> List[dict]
         """단일 표 getList 호출. 배열 반환, 오류 객체면 KosisError."""
-        params = self._params(table, prd_se, num_periods, start_prd, end_prd)
+        params = self._params(table, prd_se, num_periods, start_prd, end_prd, obj_levels)
         resp = get_with_retry(_BASE_URL, params, timeout=self.timeout,
                               session=self.session, label="KOSIS")
         data = resp.json()
@@ -152,15 +155,30 @@ class KosisClient:
         return row
 
 
-def _fetch_by_year(client, table, prd_se, num_periods, attempts=2, pause=1.2, sweeps=2):
-    # type: (KosisClient, KosisTable, Optional[str], int, int, float, int) -> List[dict]
+def _try_year(client, table, prd_se, y_lo, y_hi, extra_levels=(0, 1, 2)):
+    # type: (KosisClient, KosisTable, Optional[str], int, int, tuple) -> Optional[list]
+    """단년/범위 조회. 'objL 누락'은 그 기간의 분류 레벨이 더 많다는 뜻일 수 있어
+    objL 레벨을 늘려가며(base, +1, +2) 시도한다. 성공 시 행 반환, 전부 실패 시 None."""
+    for extra in extra_levels:
+        try:
+            return client.fetch_table(table, prd_se=prd_se,
+                                      start_prd=str(y_lo), end_prd=str(y_hi),
+                                      obj_levels=table.obj_levels + extra)
+        except (KosisError, requests.RequestException) as e:
+            last = e
+    logger.warning("[KOSIS] %s %s~%s 실패(레벨 %d~%d 모두): %s", table.key, y_lo, y_hi,
+                   table.obj_levels, table.obj_levels + max(extra_levels), last)
+    return None
+
+
+def _fetch_by_year(client, table, prd_se, num_periods, pause=0.8):
+    # type: (KosisClient, KosisTable, Optional[str], int, float) -> List[dict]
     """연도별 개별 수집(다년 백필). 대량 호출이 objL 오탐으로 실패하는 표
     (종합·전기)용.
 
     최신 연도를 newEstPrdCnt=1로 파악한 뒤 그 연도부터 num_periods개 연도를 각각
-    단년 조회(startPrdDe=endPrdDe)한다. 일부 연도는 KOSIS가 결정적으로 거부하기도
-    하므로(항목코드가 연도별로 다른 경우) sweeps회만 가볍게 재시도하고, 끝에
-    남은 연도는 범위 조회 한 번으로 만회 시도한다. 못 받은 연도는 건너뛴다.
+    단년 조회한다. 실패 시 objL 레벨을 늘려 재시도(_try_year)하고, 그래도 남으면
+    범위 조회로 만회 시도한다. 못 받은 연도는 건너뛴다.
     """
     import time
 
@@ -173,41 +191,27 @@ def _fetch_by_year(client, table, prd_se, num_periods, attempts=2, pause=1.2, sw
     by_year = {}                                  # 'YYYY' -> rows
     for r in latest:
         by_year.setdefault(str(r.get("PRD_DE", "")), []).append(r)
-    want = [latest_year - k for k in range(num_periods)]   # 최신 포함 num_periods개
+    want = [latest_year - k for k in range(num_periods)]
 
-    for sweep in range(sweeps):
-        missing = [y for y in want if str(y) not in by_year]
-        if not missing:
-            break
-        for y in missing:
-            for i in range(attempts):
-                try:
-                    rows = client.fetch_table(table, prd_se=prd_se,
-                                              start_prd=str(y), end_prd=str(y))
-                    if rows:
-                        by_year[str(y)] = rows
-                    break
-                except (KosisError, requests.RequestException) as e:
-                    logger.warning("[KOSIS] %s %d년 sweep%d/%d 시도%d 실패: %s",
-                                   table.key, y, sweep + 1, sweeps, i + 1, e)
-                    time.sleep(pause)
+    for y in want:
+        if str(y) in by_year:
+            continue
+        rows = _try_year(client, table, prd_se, y, y)
+        if rows:
+            by_year[str(y)] = rows
+        time.sleep(pause)
 
-    # 남은 연도: 범위 조회 한 번으로 만회 시도 (단년은 거부되어도 범위는 될 수 있음)
+    # 남은 연도: 범위 조회로 만회 (objL 레벨 증가 포함)
     missing = [y for y in want if str(y) not in by_year]
     if missing:
-        lo, hi = min(missing), max(missing)
-        try:
-            rows = client.fetch_table(table, prd_se=prd_se,
-                                      start_prd=str(lo), end_prd=str(hi))
-            for r in rows:
-                y = str(r.get("PRD_DE", ""))
-                if y.isdigit():
-                    by_year.setdefault(y, []).append(r)
-            if rows:
-                logger.info("[KOSIS] %s 범위 폴백 %d~%d: %d행", table.key, lo, hi, len(rows))
-        except (KosisError, requests.RequestException) as e:
-            logger.warning("[KOSIS] %s 범위 폴백 %d~%d 실패(연도 건너뜀): %s",
-                           table.key, lo, hi, e)
+        rows = _try_year(client, table, prd_se, min(missing), max(missing))
+        for r in (rows or []):
+            y = str(r.get("PRD_DE", ""))
+            if y.isdigit():
+                by_year.setdefault(y, []).append(r)
+        if rows:
+            logger.info("[KOSIS] %s 범위 폴백 %d~%d: %d행",
+                        table.key, min(missing), max(missing), len(rows))
 
     combined = [r for rows in by_year.values() for r in rows]
     logger.info("[KOSIS] %s 연도별 폴백: %d/%d개 연도 %d행",
