@@ -128,10 +128,17 @@ jobs:
         if: steps.guard.outputs.should_run == 'true'
         # 종합·전문·전기 공사규모별 발주기관별 계약실적. 수집·요약 실패가
         # 산출물 업로드를 막지 않도록 한다.
+        #
+        # ⚠️ kosis.kr은 해외(미국 GitHub 러너) IP의 443 연결을 차단한다
+        #    (probe 확인: ConnectTimeout). 한국 소재 HTTPS 프록시를
+        #    KOSIS_HTTPS_PROXY 시크릿으로 등록하면 requests가 자동으로 그걸
+        #    통해 호출한다. 미등록 시 이 스텝은 타임아웃으로 스킵된다.
         continue-on-error: true
         run: python -m src.kosis --db procurement.db
         env:
           KOSIS_API_KEY: ${{ secrets.KOSIS_API_KEY }}
+          HTTPS_PROXY: ${{ secrets.KOSIS_HTTPS_PROXY }}
+          HTTP_PROXY: ${{ secrets.KOSIS_HTTPS_PROXY }}
 
       - name: 수집 결과 요약 (표본 대조용)
         if: steps.guard.outputs.should_run == 'true'

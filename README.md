@@ -115,9 +115,20 @@ python -m src.kosis --db procurement.db --tables gen --prd-se M --periods 12
 python -m src.kosis --db procurement.db --skip-fetch    # 저장분 축 요약만
 ```
 
+> **⚠️ 네트워크 제약 (실측 확인됨):** kosis.kr은 **해외 IP의 443 연결을
+> 차단**한다. GitHub 호스티드 러너(미국)에서 probe 실행 시 3개 표 모두
+> `ConnectTimeout`으로 실패했다 (data.go.kr 게이트웨이는 러너에서 열려 KISCON은
+> 정상). 따라서 KOSIS 수집은 **한국 IP 경로**가 필요하다:
+> - **로컬 실행**: 한국 소재 PC/서버에서 위 CLI를 직접 실행 (키·코드 그대로 동작)
+> - **KR 프록시**: 한국 소재 HTTPS 프록시를 `KOSIS_HTTPS_PROXY` 시크릿으로
+>   등록하면 monthly-collect의 KOSIS 스텝이 자동으로 그걸 통해 호출한다
+>   (requests가 `HTTPS_PROXY` 환경변수를 자동 사용). 로컬에서도
+>   `HTTPS_PROXY=http://<kr-proxy> python -m src.kosis ...`로 동일하게 가능.
+> - **KR self-hosted 러너**: 한국 소재 러너를 수집 job에 지정
+
 - 표별 분류축(어느 C가 공사규모/발주기관인지)·100억↑ 구간 존재 여부는
   `scripts/probe_kosis.py`를 probe_script로 디스패치해 실측 확인합니다
-  (개발 컨테이너는 kosis.kr egress가 정책 차단이라 러너에서 실행).
+  (위 KR 경로 확보 후 — 미국 러너에서는 타임아웃).
 - 저장 후 `scale_agency_summary()`가 공사규모 × 발주기관 피벗을 이름 기반으로
   산출하므로, 우리 100억↑ 계약합계와 KOSIS 100억↑ 구간을 업종별로 대조할 수
   있습니다 (대조 로직 통합은 probe로 축 확정 후 진행).
