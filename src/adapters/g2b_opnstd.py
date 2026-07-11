@@ -203,15 +203,33 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
     # 공개 인터페이스                                                        #
     # ------------------------------------------------------------------ #
 
+    def _monthly_chunks(self, since, until):
+        # type: (date, date) -> Iterator[Tuple[date, date]]
+        """공고 오퍼레이션의 1개월 조회 제한 대응: 달력 월 단위로 분할.
+
+        한 달 이내 범위(월간 수집)는 그대로 1회 호출이 되고, 분기·연간 등
+        여러 달 범위는 달 경계로 쪼개 순차 호출한다(동시 실행 없이 한 런에서
+        직렬 처리 → data.go.kr 동시요청 502 회피)."""
+        cursor = since
+        while cursor <= until:
+            if cursor.month == 12:
+                month_end = date(cursor.year, 12, 31)
+            else:
+                month_end = date(cursor.year, cursor.month + 1, 1) - timedelta(days=1)
+            chunk_end = min(month_end, until)
+            yield cursor, chunk_end
+            cursor = chunk_end + timedelta(days=1)
+
     def fetch_notices(self, since, until):
         # type: (date, date) -> Iterator[Dict]
-        """입찰공고 수집 (입찰공고일시 기준, 1개월 제한 → 월 단위 호출 가능)."""
-        params = {
-            "bidNtceBgnDt": since.strftime("%Y%m%d") + "0000",
-            "bidNtceEndDt": until.strftime("%Y%m%d") + "2359",
-        }
-        for item in self._request(_NOTICE_OP, params):
-            yield item
+        """입찰공고 수집 (입찰공고일시 기준, 1개월 제한 → 월 단위 자동 분할)."""
+        for begin, end in self._monthly_chunks(since, until):
+            params = {
+                "bidNtceBgnDt": begin.strftime("%Y%m%d") + "0000",
+                "bidNtceEndDt": end.strftime("%Y%m%d") + "2359",
+            }
+            for item in self._request(_NOTICE_OP, params):
+                yield item
 
     def fetch_awards(self, since, until):
         # type: (date, date) -> Iterator[Dict]

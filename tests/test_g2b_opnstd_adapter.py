@@ -191,6 +191,44 @@ def test_award_weekly_chunk_split(adapter):
         assert mock_req.call_count == 3
 
 
+def test_notice_single_month_one_call(adapter):
+    """한 달 이내 범위(월간 수집)는 공고 _request 1회만 호출."""
+    with patch.object(adapter, "_request", return_value=[]) as mock_req:
+        list(adapter.fetch_notices(since=date(2025, 3, 1), until=date(2025, 3, 31)))
+    assert mock_req.call_count == 1
+
+
+def test_notice_quarter_splits_by_month(adapter):
+    """분기(1~3월) 범위 → 공고 1개월 제한 대응으로 달 단위 3회 분할."""
+    with patch.object(adapter, "_request", return_value=[]) as mock_req:
+        list(adapter.fetch_notices(since=date(2025, 1, 1), until=date(2025, 3, 31)))
+    assert mock_req.call_count == 3
+    p1 = mock_req.call_args_list[0].args[1]
+    p2 = mock_req.call_args_list[1].args[1]
+    assert p1["bidNtceBgnDt"] == "202501010000"
+    assert p1["bidNtceEndDt"] == "202501312359"   # 1월 말일까지
+    assert p2["bidNtceBgnDt"] == "202502010000"
+
+
+def test_notice_full_year_twelve_calls(adapter):
+    """연간 범위 → 12개월 분할."""
+    with patch.object(adapter, "_request", return_value=[]) as mock_req:
+        list(adapter.fetch_notices(since=date(2025, 1, 1), until=date(2025, 12, 31)))
+    assert mock_req.call_count == 12
+
+
+def test_notice_partial_month_range(adapter):
+    """월 중간에 걸친 범위(2/15~4/10) → 2·3·4월 3회 분할, 경계 정확."""
+    with patch.object(adapter, "_request", return_value=[]) as mock_req:
+        list(adapter.fetch_notices(since=date(2025, 2, 15), until=date(2025, 4, 10)))
+    assert mock_req.call_count == 3
+    calls = mock_req.call_args_list
+    assert calls[0].args[1]["bidNtceBgnDt"] == "202502150000"
+    assert calls[0].args[1]["bidNtceEndDt"] == "202502282359"
+    assert calls[2].args[1]["bidNtceBgnDt"] == "202504010000"
+    assert calls[2].args[1]["bidNtceEndDt"] == "202504102359"
+
+
 # ------------------------------------------------------------------ #
 # bidNtceNo 스코프 조회 (probe 검증 + 폴백)                            #
 # ------------------------------------------------------------------ #
