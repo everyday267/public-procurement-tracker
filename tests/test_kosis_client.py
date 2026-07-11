@@ -317,6 +317,52 @@ def test_ge_threshold_disjoint_despite_isang_labels(db_conn):
     assert amt["krw"] == 400.0 * 1_000_000                   # 100억이상 구간(배타적)
 
 
+def test_ge_threshold_excludes_agency_total(db_conn):
+    # agencies=None 전체 집계 시 '합계' 발주기관 행을 제외(개별과 이중계상 방지)
+    from src.kosis import ge_threshold_amount
+    rows = [
+        ("발주기관별", "합계", "공사규모별", "100억원이상", 800.0),   # 개별의 합 → 제외돼야
+        ("발주기관별", "정부기관", "공사규모별", "100억원이상", 500.0),
+        ("발주기관별", "민간", "공사규모별", "100억원이상", 300.0),
+    ]
+    for i, (o1, m1, o2, m2, dt) in enumerate(rows):
+        db_conn.execute(
+            "INSERT INTO kosis_stats (org_id, tbl_id, industry, prd_de, itm_id, "
+            "itm_nm, unit_nm, c1_obj, c1_code, c1_nm, c2_obj, c2_code, c2_nm, dt) "
+            "VALUES ('366','TX_36601_A083','전문','2024',?,?,'백만원',?,?,?,?,?,?,?)",
+            (str(i), "금액", o1, str(i), m1, o2, str(i), m2, dt),
+        )
+    db_conn.commit()
+    amt = ge_threshold_amount(db_conn, "전문", min_eok=100)   # 전체(합계 제외)
+    assert amt["krw"] == (500.0 + 300.0) * 1_000_000          # 합계 800 제외, 정부+민간
+    pub = ge_threshold_amount(db_conn, "전문", min_eok=100,
+                              agencies={"정부기관"})
+    assert pub["krw"] == 500.0 * 1_000_000
+
+
+def test_collect_purges_stale_table_on_swap(client, db_conn):
+    # 같은 산업의 옛 tbl_id 데이터를 새 표 수집 시 제거 (전문 A089→A083 교체 시나리오)
+    db_conn.execute(
+        "INSERT INTO kosis_stats (org_id, tbl_id, industry, prd_de, itm_id, itm_nm, "
+        "unit_nm, c2_obj, c2_code, c2_nm, dt) VALUES "
+        "('366','TX_36601_A089','전문','2024','x','금액','백만원','공사규모별','a','50억원 이상',1.0)")
+    db_conn.commit()
+
+    a083 = [{
+        "C1_OBJ_NM": "발주기관별", "C1": "1", "C1_NM": "합계",
+        "C2_OBJ_NM": "공사규모별", "C2": "2", "C2_NM": "100억원이상",
+        "ITM_ID": "16366AAA2", "ITM_NM": "금액", "UNIT_NM": "백만원",
+        "DT": "999", "PRD_SE": "Y", "PRD_DE": "2024",
+        "ORG_ID": "366", "TBL_ID": "TX_36601_A083",
+    }]
+    client.fetch_table = lambda *a, **k: a083
+    collect_kosis(db_conn, client, tables=["spec"])
+
+    tbls = {r[0] for r in db_conn.execute(
+        "SELECT DISTINCT tbl_id FROM kosis_stats WHERE industry='전문'").fetchall()}
+    assert tbls == {"TX_36601_A083"}        # 옛 A089 제거됨
+
+
 def test_ge100_public_by_year_filters_public(db_conn):
     from src.kosis import ge100_public_by_year
     rows = [

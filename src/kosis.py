@@ -195,6 +195,11 @@ def collect_kosis(conn, client, tables=None, prd_se=None, num_periods=10):
             logger.warning("[KOSIS] %s 수집 최종 실패: %s", key, e)
             continue
         rows = [client.normalize(r, table) for r in raw]
+        # 표 교체(예: 전문 A089→A083) 시 같은 산업의 옛 tbl_id 데이터를 제거해
+        # 한 industry에 두 표가 섞이지 않게 한다.
+        conn.execute("DELETE FROM kosis_stats WHERE industry=? AND tbl_id<>?",
+                     (table.industry, table.tbl_id))
+        conn.commit()
         n = upsert_kosis_stats(conn, rows)
         logger.info("[KOSIS] %s(%s) %d행 수집", key, table.industry, n)
         total += n
@@ -374,6 +379,9 @@ def scale_brackets(conn, industry):
 # 표기되나 종합·전문 대조에는 쓰지 않는다(전기는 KISCON·핵심 대조 대상 외).
 PUBLIC_AGENCIES = frozenset({"정부기관", "지방자치단체", "공공단체", "공기업"})
 
+# 발주기관 축의 집계행(개별 기관의 합) — 개별 기관과 함께 더하면 이중계상된다.
+_AGENCY_TOTAL = frozenset({"합계", "소계", "계", "전체"})
+
 
 def _detect_scheme(conn, industry, cum_ratio=1.5, disj_ratio=1.1):
     # type: (object, str, float, float) -> str
@@ -425,6 +433,9 @@ def ge_threshold_amount(conn, industry, min_eok=100, agencies=None, month=None, 
             if r["krw"] is not None and (year is None or r["prd_de"] == year)]
     if agencies is not None:
         rows = [r for r in rows if r["agency"] in agencies]
+    else:
+        # 전체 집계 시 '합계' 발주기관 행 제외 (개별 기관과 이중계상 방지)
+        rows = [r for r in rows if r["agency"] not in _AGENCY_TOTAL]
     scheme = _detect_scheme(conn, industry)
 
     if scheme == "cumulative":
@@ -499,9 +510,12 @@ def main():
         logger.info("    → 공사규모 하한(억): %s",
                     [(b["scale"], b["lower_eok"]) for b in brackets])
         logger.info("    → 100억↑로 분류된 구간: %s", ge or "(없음)")
-        amt = ge_threshold_amount(conn, table.industry, min_eok=100)
-        logger.info("    → 100억↑ 금액합계(전체 발주기관, 연간): %s 원",
-                    "{:,.0f}".format(amt["krw"]))
+        allx = ge_threshold_amount(conn, table.industry, min_eok=100)
+        pub = ge_threshold_amount(conn, table.industry, min_eok=100,
+                                  agencies=PUBLIC_AGENCIES)
+        logger.info("    → 스킴=%s / 100억↑ 금액합계(연간): 전체(합계행 제외) %s원 · 공공 %s원",
+                    allx["scheme"], "{:,.0f}".format(allx["krw"]),
+                    "{:,.0f}".format(pub["krw"]))
     return 0
 
 
