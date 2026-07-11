@@ -152,6 +152,31 @@ class KosisClient:
         return row
 
 
+def _fetch_table_resilient(client, table, prd_se, num_periods, attempts=3, pause=1.5):
+    # type: (KosisClient, KosisTable, Optional[str], int, int, float) -> List[dict]
+    """표 단위 회복 수집. KOSIS는 유효한 요청에도 간헐적으로
+    '필수요청변수값이 누락되었습니다' 오류 객체(HTTP 200)를 반환하므로
+    (get_with_retry는 이를 재시도하지 않음) 여기서 표 단위로 재시도한다.
+    끝까지 실패하면 마지막 수단으로 num_periods=1로 축소 재시도한다."""
+    import time
+
+    last = None
+    for i in range(attempts):
+        try:
+            return client.fetch_table(table, prd_se=prd_se, num_periods=num_periods)
+        except (KosisError, requests.RequestException) as e:
+            last = e
+            logger.warning("[KOSIS] %s 시도 %d/%d 실패: %s", table.key, i + 1, attempts, e)
+            time.sleep(pause)
+    if num_periods != 1:
+        logger.warning("[KOSIS] %s num_periods=1로 축소 재시도", table.key)
+        try:
+            return client.fetch_table(table, prd_se=prd_se, num_periods=1)
+        except (KosisError, requests.RequestException) as e:
+            last = e
+    raise last
+
+
 def collect_kosis(conn, client, tables=None, prd_se=None, num_periods=10):
     # type: (object, KosisClient, Optional[List[str]], Optional[str], int) -> int
     """등록 표(기본 3종)를 수집해 kosis_stats에 upsert. 수집 행수 반환.
@@ -165,9 +190,9 @@ def collect_kosis(conn, client, tables=None, prd_se=None, num_periods=10):
     for key in keys:
         table = KOSIS_TABLES[key]
         try:
-            raw = client.fetch_table(table, prd_se=prd_se, num_periods=num_periods)
+            raw = _fetch_table_resilient(client, table, prd_se, num_periods)
         except (KosisError, requests.RequestException) as e:
-            logger.warning("[KOSIS] %s 수집 실패: %s", key, e)
+            logger.warning("[KOSIS] %s 수집 최종 실패: %s", key, e)
             continue
         rows = [client.normalize(r, table) for r in raw]
         n = upsert_kosis_stats(conn, rows)

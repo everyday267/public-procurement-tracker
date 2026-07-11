@@ -149,7 +149,9 @@ def test_fetch_table_returns_array(client):
 
 # ── collect (멱등 + 부분 실패 허용) ──────────────────────────────────────
 
-def test_collect_kosis_idempotent_and_partial(client, db_conn):
+def test_collect_kosis_idempotent_and_partial(client, db_conn, monkeypatch):
+    import time
+    monkeypatch.setattr(time, "sleep", lambda *_: None)   # 재시도 대기 제거
     gen = load_json_fixture("kosis", "gen_a072.json")
     elec = load_json_fixture("kosis", "elec_a010.json")
 
@@ -158,7 +160,7 @@ def test_collect_kosis_idempotent_and_partial(client, db_conn):
             return gen
         if table.key == "elec":
             return elec
-        raise KosisError("spec 표 조회 실패")           # 부분 실패
+        raise KosisError("spec 표 조회 실패")           # 부분 실패 (재시도 후 포기)
 
     client.fetch_table = fake_fetch
     n1 = collect_kosis(db_conn, client, tables=["gen", "spec", "elec"])
@@ -166,6 +168,44 @@ def test_collect_kosis_idempotent_and_partial(client, db_conn):
     assert n1 == n2 == 8                                 # gen4 + elec4 (spec 실패)
     count = db_conn.execute("SELECT COUNT(*) FROM kosis_stats").fetchone()[0]
     assert count == 8                                    # 멱등
+
+
+def test_fetch_table_resilient_retries_transient_error(client, monkeypatch):
+    import time
+    from src.kosis import _fetch_table_resilient
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
+    gen = load_json_fixture("kosis", "gen_a072.json")
+
+    calls = {"n": 0}
+
+    def flaky(table, prd_se=None, num_periods=10):
+        calls["n"] += 1
+        if calls["n"] < 3:                               # 처음 2회 오탐 오류
+            raise KosisError("필수요청변수값이 누락되었습니다. (objL)")
+        return gen
+
+    client.fetch_table = flaky
+    out = _fetch_table_resilient(client, KOSIS_TABLES["gen"], None, 10)
+    assert len(out) == 4 and calls["n"] == 3
+
+
+def test_fetch_table_resilient_falls_back_to_one_period(client, monkeypatch):
+    import time
+    from src.kosis import _fetch_table_resilient
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
+    gen = load_json_fixture("kosis", "gen_a072.json")
+
+    seen = []
+
+    def only_one_period(table, prd_se=None, num_periods=10):
+        seen.append(num_periods)
+        if num_periods != 1:
+            raise KosisError("필수요청변수값이 누락되었습니다. (objL)")
+        return gen
+
+    client.fetch_table = only_one_period
+    out = _fetch_table_resilient(client, KOSIS_TABLES["gen"], None, 10, attempts=2)
+    assert len(out) == 4 and seen[-1] == 1               # 축소 재시도로 성공
 
 
 # ── 축 매핑 + 월별 중복 방지 ─────────────────────────────────────────────
