@@ -272,13 +272,13 @@ def test_ge_threshold_amount(db_conn):
     assert pub["agencies"] == {"국가기관", "지방자치단체"}
 
 
-def test_ge_threshold_cumulative_scheme_no_sum(db_conn):
-    # 전기식 누적형('N억이상') — 합산 금지, '100억이상' 단일 구간이 곧 ≥100 총합
-    from src.kosis import ge_threshold_amount
+def test_ge_threshold_cumulative_detected_from_data(db_conn):
+    # 진짜 누적형: 구간 합(Σ) ≫ 합계 → cumulative 감지 → 합산 금지, 단일 구간 선택
+    from src.kosis import ge_threshold_amount, _detect_scheme
     rows = [
-        ("공사규모별", "50억원이상", "발주기관별", "정부기관", 900.0),
-        ("공사규모별", "100억원이상", "발주기관별", "정부기관", 500.0),
-        ("공사규모별", "100억원이상", "발주기관별", "지방자치단체", 300.0),
+        ("공사규모별", "합계", "발주기관별", "정부기관", 1000.0),   # 총계
+        ("공사규모별", "50억원이상", "발주기관별", "정부기관", 1000.0),  # 넓은 구간 ≈ 총계
+        ("공사규모별", "100억원이상", "발주기관별", "정부기관", 700.0),  # 중첩
     ]
     for i, (o1, m1, o2, m2, dt) in enumerate(rows):
         db_conn.execute(
@@ -288,10 +288,33 @@ def test_ge_threshold_cumulative_scheme_no_sum(db_conn):
             (str(i), "금액", o1, str(i), m1, o2, str(i), m2, dt),
         )
     db_conn.commit()
+    assert _detect_scheme(db_conn, "전기") == "cumulative"   # Σ(1700) ≫ 합계(1000)
     amt = ge_threshold_amount(db_conn, "전기", min_eok=100)
     assert amt["scheme"] == "cumulative"
-    assert amt["brackets"] == {"100억원이상"}          # 50억이상 합산 안 함
-    assert amt["krw"] == (500.0 + 300.0) * 1_000_000   # 두 발주기관 100억이상 합
+    assert amt["brackets"] == {"100억원이상"}                # 합산 안 함
+    assert amt["krw"] == 700.0 * 1_000_000
+
+
+def test_ge_threshold_disjoint_despite_isang_labels(db_conn):
+    # 전기 실제 케이스: 라벨은 'N억이상'이나 값이 배타적(Σ ≈ 합계) → disjoint
+    from src.kosis import ge_threshold_amount, _detect_scheme
+    rows = [
+        ("공사규모별", "합계", "발주기관별", "정부기관", 1000.0),
+        ("공사규모별", "50억원이상", "발주기관별", "정부기관", 600.0),   # 배타적 구간
+        ("공사규모별", "100억원이상", "발주기관별", "정부기관", 400.0),  # 배타적 구간
+    ]
+    for i, (o1, m1, o2, m2, dt) in enumerate(rows):
+        db_conn.execute(
+            "INSERT INTO kosis_stats (org_id, tbl_id, industry, prd_de, itm_id, "
+            "itm_nm, unit_nm, c1_obj, c1_code, c1_nm, c2_obj, c2_code, c2_nm, dt) "
+            "VALUES ('370','T','전기','2024',?,?,'백만원',?,?,?,?,?,?,?)",
+            (str(i), "금액", o1, str(i), m1, o2, str(i), m2, dt),
+        )
+    db_conn.commit()
+    assert _detect_scheme(db_conn, "전기") == "disjoint"     # Σ(1000) ≈ 합계(1000)
+    amt = ge_threshold_amount(db_conn, "전기", min_eok=100)
+    assert amt["scheme"] == "disjoint"
+    assert amt["krw"] == 400.0 * 1_000_000                   # 100억이상 구간(배타적)
 
 
 def test_ge100_public_by_year_filters_public(db_conn):

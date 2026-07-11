@@ -375,19 +375,38 @@ def scale_brackets(conn, industry):
 PUBLIC_AGENCIES = frozenset({"정부기관", "지방자치단체", "공공단체", "공기업"})
 
 
-def _scale_scheme(scales):
-    # type: (set) -> str
-    """공사규모 구간 스킴 판별.
-    'disjoint'  : 범위형(종합·전문, '100~200억미만' 등) → 구간 합산 가능
-    'cumulative': 누적형(전기, '100억이상' 등 'N이상'만) → 합산 금지(구간 자체가 총합)
+def _detect_scheme(conn, industry, cum_ratio=1.5, disj_ratio=1.1):
+    # type: (object, str, float, float) -> str
+    """공사규모 구간 스킴을 **데이터로** 판별한다 (라벨 추정 금지).
+
+    각 (발주기관, 연도) 그룹에서 Σ(구간별 금액) 을 '합계' 행과 비교:
+      - Σ ≈ 합계        → 'disjoint' (구간이 배타적, 합산 가능)
+      - Σ ≫ 합계(중첩)  → 'cumulative' (구간이 포함관계, 합산 금지)
+    'N억이상' 라벨이어도 실제 값이 배타적이면 disjoint로 잡힌다
+    (전기 DT_370001_A010이 이 경우 — 라벨은 '이상'이나 값은 배타적 구간).
     """
-    members = [s for s in scales
-               if s and s not in ("합계", "소계", "계")]
-    if not members:
-        return "disjoint"
-    if all(m.endswith("이상") and "~" not in m and "미만" not in m for m in members):
-        return "cumulative"
-    return "disjoint"
+    from collections import defaultdict
+
+    groups = defaultdict(lambda: {"total": 0.0, "part": 0.0, "has_total": False})
+    for r in scale_agency_summary(conn, industry):
+        if r["krw"] is None:
+            continue
+        g = groups[(r["agency"], r["prd_de"])]
+        if r["scale"] in _MONTH_TOTAL:          # '합계'/'계'/'전체'
+            g["total"] += r["krw"]
+            g["has_total"] = True
+        else:
+            g["part"] += r["krw"]
+
+    cum = disj = 0
+    for g in groups.values():
+        if not g["has_total"] or g["total"] <= 0:
+            continue
+        if g["part"] >= g["total"] * cum_ratio:
+            cum += 1
+        elif g["part"] <= g["total"] * disj_ratio:
+            disj += 1
+    return "cumulative" if cum > disj else "disjoint"
 
 
 def ge_threshold_amount(conn, industry, min_eok=100, agencies=None, month=None, year=None):
@@ -406,7 +425,7 @@ def ge_threshold_amount(conn, industry, min_eok=100, agencies=None, month=None, 
             if r["krw"] is not None and (year is None or r["prd_de"] == year)]
     if agencies is not None:
         rows = [r for r in rows if r["agency"] in agencies]
-    scheme = _scale_scheme({r["scale"] for r in rows})
+    scheme = _detect_scheme(conn, industry)
 
     if scheme == "cumulative":
         # min_eok 이상 구간 중 하한이 가장 작은 것을 선택 (그 자체가 누적 총합)
