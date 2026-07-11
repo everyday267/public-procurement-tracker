@@ -140,12 +140,18 @@ jobs:
           HTTPS_PROXY: ${{ secrets.KOSIS_HTTPS_PROXY }}
           HTTP_PROXY: ${{ secrets.KOSIS_HTTPS_PROXY }}
 
+      - name: KOSIS 연간 대조 (상한 sanity check)
+        if: steps.guard.outputs.should_run == 'true'
+        # KOSIS 수집이 비어있으면(해외 러너 차단) NO_KOSIS로 로그만 남고 넘어간다.
+        continue-on-error: true
+        run: python -m src.validate_kosis --db procurement.db
+
       - name: 수집 결과 요약 (표본 대조용)
         if: steps.guard.outputs.should_run == 'true'
         run: |
           # 통합 조인 CSV와 계약 CSV는 전문 출력한다 — 개발 컨테이너에서
           # 아티팩트를 내려받을 수 없어 로그가 유일한 데이터 회수 경로다.
-          for f in output/all_joined_*.csv output/*_contracts_*.csv output/kiscon_recon_*.csv output/kiscon_recon_*.md; do
+          for f in output/all_joined_*.csv output/*_contracts_*.csv output/kiscon_recon_*.csv output/kiscon_recon_*.md output/kosis_recon_*.csv output/kosis_recon_*.md; do
             [ -f "$f" ] || continue
             echo "===== $f ($(($(wc -l < "$f") - 1))행) ====="
             cat "$f"

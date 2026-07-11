@@ -272,6 +272,49 @@ def test_ge_threshold_amount(db_conn):
     assert pub["agencies"] == {"국가기관", "지방자치단체"}
 
 
+def test_ge_threshold_cumulative_scheme_no_sum(db_conn):
+    # 전기식 누적형('N억이상') — 합산 금지, '100억이상' 단일 구간이 곧 ≥100 총합
+    from src.kosis import ge_threshold_amount
+    rows = [
+        ("공사규모별", "50억원이상", "발주기관별", "정부기관", 900.0),
+        ("공사규모별", "100억원이상", "발주기관별", "정부기관", 500.0),
+        ("공사규모별", "100억원이상", "발주기관별", "지방자치단체", 300.0),
+    ]
+    for i, (o1, m1, o2, m2, dt) in enumerate(rows):
+        db_conn.execute(
+            "INSERT INTO kosis_stats (org_id, tbl_id, industry, prd_de, itm_id, "
+            "itm_nm, unit_nm, c1_obj, c1_code, c1_nm, c2_obj, c2_code, c2_nm, dt) "
+            "VALUES ('370','T','전기','2024',?,?,'백만원',?,?,?,?,?,?,?)",
+            (str(i), "금액", o1, str(i), m1, o2, str(i), m2, dt),
+        )
+    db_conn.commit()
+    amt = ge_threshold_amount(db_conn, "전기", min_eok=100)
+    assert amt["scheme"] == "cumulative"
+    assert amt["brackets"] == {"100억원이상"}          # 50억이상 합산 안 함
+    assert amt["krw"] == (500.0 + 300.0) * 1_000_000   # 두 발주기관 100억이상 합
+
+
+def test_ge100_public_by_year_filters_public(db_conn):
+    from src.kosis import ge100_public_by_year
+    rows = [
+        ("발주기관별", "정부기관", "공사규모별", "100~200억원 미만", "2024", 500.0),
+        ("발주기관별", "민간", "공사규모별", "100~200억원 미만", "2024", 999.0),
+        ("발주기관별", "지방자치단체", "공사규모별", "1000억원 이상", "2023", 200.0),
+    ]
+    for i, (o1, m1, o2, m2, yr, dt) in enumerate(rows):
+        db_conn.execute(
+            "INSERT INTO kosis_stats (org_id, tbl_id, industry, prd_de, itm_id, "
+            "itm_nm, unit_nm, c1_obj, c1_code, c1_nm, c2_obj, c2_code, c2_nm, dt) "
+            "VALUES ('365','T','종합',?,?,?,'십억원',?,?,?,?,?,?,?)",
+            (yr, str(i), "금액", o1, str(i), m1, o2, str(i), m2, dt),
+        )
+    db_conn.commit()
+    by_year = ge100_public_by_year(db_conn, "종합")
+    # 민간 제외(공공만): 2024=정부 500, 2023=지자체 200 (십억원 환산)
+    assert by_year["2024"] == 500.0 * 1_000_000_000
+    assert by_year["2023"] == 200.0 * 1_000_000_000
+
+
 def test_scale_brackets_sorted(db_conn):
     for i, nm in enumerate(["합계", "100억~300억", "4000만원 미만", "1000억원이상"]):
         db_conn.execute(

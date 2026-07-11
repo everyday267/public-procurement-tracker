@@ -370,26 +370,72 @@ def scale_brackets(conn, industry):
                   key=lambda x: (x["lower_eok"] is None, x["lower_eok"] or 0))
 
 
-def ge_threshold_amount(conn, industry, min_eok=100, agencies=None, month=None):
-    # type: (object, str, float, Optional[set], Optional[str]) -> dict
-    """공사규모 하한 ≥ min_eok억 구간의 금액(원) 합계.
+# 공공 발주기관 집합 (probe 확인: 세 표 공통 라벨). 전기의 '한국전력'은 별도
+# 표기되나 종합·전문 대조에는 쓰지 않는다(전기는 KISCON·핵심 대조 대상 외).
+PUBLIC_AGENCIES = frozenset({"정부기관", "지방자치단체", "공공단체", "공기업"})
 
-    반환: {'krw': 합계원, 'brackets': 포함된 구간 라벨 set, 'agencies': 집계 발주기관 set}.
-    agencies 지정 시 해당 발주기관 멤버만 합산(예: 공공 집합). None이면 전체.
-    금액 항목(krw is not None)만 대상으로 한다.
+
+def _scale_scheme(scales):
+    # type: (set) -> str
+    """공사규모 구간 스킴 판별.
+    'disjoint'  : 범위형(종합·전문, '100~200억미만' 등) → 구간 합산 가능
+    'cumulative': 누적형(전기, '100억이상' 등 'N이상'만) → 합산 금지(구간 자체가 총합)
     """
-    total = 0.0
-    brackets, used_agencies = set(), set()
-    for r in scale_agency_summary(conn, industry, itm_nm_like="금액", month=month):
-        lb = scale_lower_bound_eok(r["scale"])
-        if lb is None or lb < min_eok or r["krw"] is None:
-            continue
-        if agencies is not None and r["agency"] not in agencies:
-            continue
-        total += r["krw"]
-        brackets.add(r["scale"])
-        used_agencies.add(r["agency"])
-    return {"krw": total, "brackets": brackets, "agencies": used_agencies}
+    members = [s for s in scales
+               if s and s not in ("합계", "소계", "계")]
+    if not members:
+        return "disjoint"
+    if all(m.endswith("이상") and "~" not in m and "미만" not in m for m in members):
+        return "cumulative"
+    return "disjoint"
+
+
+def ge_threshold_amount(conn, industry, min_eok=100, agencies=None, month=None, year=None):
+    # type: (object, str, float, Optional[set], Optional[str], Optional[str]) -> dict
+    """공사규모 하한 ≥ min_eok억 금액(원) 합계. 범위형/누적형 스킴을 구분한다.
+
+    - 범위형(종합·전문): 하한 ≥ min_eok인 모든 구간을 합산 (구간은 서로 배타적).
+    - 누적형(전기): 'N이상' 구간은 서로 포함관계 → 합산 금지. min_eok 이상 중
+      하한이 가장 작은 단일 구간이 곧 '≥min_eok 총합'이다(예: '100억이상').
+    agencies 지정 시 해당 발주기관만, year 지정 시 해당 연도만. 금액 항목만.
+    반환: {krw, brackets, agencies, scheme}.
+    """
+    rows = [r for r in scale_agency_summary(conn, industry, itm_nm_like="금액", month=month)
+            if r["krw"] is not None and (year is None or r["prd_de"] == year)]
+    if agencies is not None:
+        rows = [r for r in rows if r["agency"] in agencies]
+    scheme = _scale_scheme({r["scale"] for r in rows})
+
+    if scheme == "cumulative":
+        # min_eok 이상 구간 중 하한이 가장 작은 것을 선택 (그 자체가 누적 총합)
+        eligible = sorted({(scale_lower_bound_eok(r["scale"]), r["scale"]) for r in rows
+                           if (scale_lower_bound_eok(r["scale"]) or -1) >= min_eok})
+        if not eligible:
+            return {"krw": 0.0, "brackets": set(), "agencies": set(), "scheme": scheme}
+        target = eligible[0][1]
+        sel = [r for r in rows if r["scale"] == target]
+    else:
+        sel = [r for r in rows
+               if (scale_lower_bound_eok(r["scale"]) or -1) >= min_eok]
+
+    return {
+        "krw": sum(r["krw"] for r in sel),
+        "brackets": {r["scale"] for r in sel},
+        "agencies": {r["agency"] for r in sel},
+        "scheme": scheme,
+    }
+
+
+def ge100_public_by_year(conn, industry, min_eok=100):
+    # type: (object, str, float) -> Dict[str, float]
+    """연도별 '공공 발주 × ≥min_eok억' 금액(원). {year: krw}."""
+    years = {r["prd_de"] for r in scale_agency_summary(conn, industry, itm_nm_like="금액")}
+    out = {}
+    for y in years:
+        amt = ge_threshold_amount(conn, industry, min_eok=min_eok,
+                                  agencies=PUBLIC_AGENCIES, year=y)
+        out[y] = amt["krw"]
+    return out
 
 
 def main():
