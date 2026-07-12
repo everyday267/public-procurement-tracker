@@ -211,3 +211,19 @@ def test_kepco_unpriced_isolated(tmp_path):
     conn.close()
     assert priced == ["R2026-K1"]
     assert unpriced_rows == ["R2026-K2"]
+
+
+def test_is_target_contract_installment_uses_total():
+    """차수 계약(차수 금액<100억, 총액≥100억)은 총액 기준으로 대상."""
+    from src.run_monthly import _is_target_contract
+    assert _is_target_contract({"contract_price": 3_000_000_000,
+                                "total_contract_price": 38_000_000_000,
+                                "bsns_div": "공사"}) is True
+    assert _is_target_contract({"contract_price": 3_000_000_000,
+                                "total_contract_price": 8_000_000_000,
+                                "bsns_div": "공사"}) is False
+    assert _is_target_contract({"contract_price": 12_000_000_000,
+                                "total_contract_price": None,
+                                "bsns_div": None}) is True
+    assert _is_target_contract({"contract_price": None,
+                                "total_contract_price": None}) is False

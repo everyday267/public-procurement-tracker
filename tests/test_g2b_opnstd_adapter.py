@@ -314,3 +314,22 @@ def test_is_large_construction_contract(adapter):
     assert adapter.is_large_construction_contract(small) is False
     assert adapter.is_large_construction_contract(service) is False
     assert adapter.is_large_construction_contract(at_threshold) is True
+
+
+def test_is_large_construction_contract_installment_of_big_total(adapter):
+    """장기계속공사 차수 계약: 차수 금액 30억 + 총계약금액 380억 → 대상.
+
+    (기존 `cntrctAmt or ttal` 구현은 차수 금액만 보고 탈락시켜, 성능개선·
+    교량 등 연차계약 100억↑ 공사가 계약 탭에서 통째로 빠졌다.)
+    """
+    installment = {"bsnsDivNm": "공사",
+                   "cntrctAmt": "3000000000",          # 30억 (이번 차수)
+                   "ttalCntrctAmt": "38000000000"}     # 380억 (총액)
+    assert adapter.is_large_construction_contract(installment) is True
+    # 총액도 100억 미만이면 여전히 제외
+    small_both = {"bsnsDivNm": "공사",
+                  "cntrctAmt": "3000000000", "ttalCntrctAmt": "8000000000"}
+    assert adapter.is_large_construction_contract(small_both) is False
+    # 총액만 있는 레코드(차수 금액 미기재)도 총액 기준 판단
+    total_only = {"bsnsDivNm": "공사", "ttalCntrctAmt": "12000000000"}
+    assert adapter.is_large_construction_contract(total_only) is True

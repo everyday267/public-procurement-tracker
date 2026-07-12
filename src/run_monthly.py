@@ -73,9 +73,14 @@ CONTRACT_OUT_COLS = [
 
 
 def _is_target_contract(c: dict) -> bool:
-    """체결일 기준 대상 계약: 계약금액 100억↑ + 공사(구분 정보가 있으면 공사)."""
-    price = c.get("contract_price")
-    if price is None or price < CONSTRUCTION_MIN_PRICE:
+    """체결일 기준 대상 계약: 공사 + (계약금액 또는 총계약금액) 100억↑.
+
+    장기계속공사 차수 계약은 contract_price(차수 금액)가 100억 미만이어도
+    total_contract_price(총계약금액)가 100억↑이면 대상 — 총액 기준 판단.
+    """
+    amounts = [v for v in (c.get("contract_price"), c.get("total_contract_price"))
+               if v is not None]
+    if not amounts or max(amounts) < CONSTRUCTION_MIN_PRICE:
         return False
     bd = c.get("bsns_div")
     return bd is None or "공사" in str(bd)

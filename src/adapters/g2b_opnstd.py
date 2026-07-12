@@ -396,11 +396,18 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
 
     def is_large_construction_contract(self, raw):
         # type: (dict) -> bool
-        """공사 + 계약금액 100억↑ 계약인지 (raw 레코드 기준, 빠른 사전 필터)."""
+        """공사 + 100억↑ 계약인지 (raw 레코드 기준, 빠른 사전 필터).
+
+        장기계속공사의 차수(연차) 계약은 cntrctAmt(이번 차수 금액)가 100억
+        미만이어도 ttalCntrctAmt(총계약금액)가 100억↑이면 대상이다 — 공사이행
+        보증 관점의 '주계약'은 총액 기준. 기존 `cntrctAmt or ttal` 구현은
+        cntrctAmt가 있으면 총액을 아예 안 봐서 연차계약을 전부 누락시켰다.
+        """
         if "공사" not in str(raw.get("bsnsDivNm", "")):
             return False
-        amt = self._to_int(raw.get("cntrctAmt")) or self._to_int(raw.get("ttalCntrctAmt"))
-        return amt is not None and amt >= CONTRACT_MIN_PRICE
+        amounts = [a for a in (self._to_int(raw.get("cntrctAmt")),
+                               self._to_int(raw.get("ttalCntrctAmt"))) if a is not None]
+        return bool(amounts) and max(amounts) >= CONTRACT_MIN_PRICE
 
     def health_check(self):
         # type: () -> bool
