@@ -48,12 +48,18 @@ ODCLOUD_DATASETS: dict[str, dict[int, str]] = {
     "ewp": {
         2025: "/15065323/v1/uddi:76402d29-9ed9-4ffe-9197-8dcc89147adc",
     },
+    # 한국중부발전 입찰정보(15003748). 최신 스냅샷이 2020~직전 상반기 누적본
+    # (전체 9,791행). 신규 연도 등록 시 최신 uddi를 추가하면 _odcloud_path가 자동 선택.
+    "komipo": {
+        2026: "/15003748/v1/uddi:34a82e9b-9b6a-471d-a9b5-c333ec8b9694",
+    },
 }
 
 # source → 발주기관 한글명 (demand_inst 구성용)
 ODCLOUD_INST_NAME = {
-    "kospo": "한국남부발전",
-    "ewp":   "한국동서발전",
+    "kospo":  "한국남부발전",
+    "ewp":    "한국동서발전",
+    "komipo": "한국중부발전",
 }
 
 MIN_CONTRACT_PRICE = 10_000_000_000  # 100억 (공사이행보증서 대상 규모)

@@ -8,7 +8,9 @@ import pytest
 from datetime import date
 from unittest.mock import patch
 
-from src.adapters.kepco_family import KOSPOAdapter, EWPAdapter, KOMIPOAdapter
+from src.adapters.kepco_family import (
+    KOSPOAdapter, EWPAdapter, KOMIPOAdapter, KOENAdapter,
+)
 from src.adapters.genco_odcloud import ODCLOUD_DATASETS
 from src.run_monthly import _is_target_contract
 
@@ -74,6 +76,14 @@ def test_kospo_construction_by_name_heuristic():
     assert a._odcloud_is_construction("공사용역입찰정보", "시설관리 위탁용역") is False
     # 구매입찰정보는 공사 아님
     assert a._odcloud_is_construction("구매입찰정보", "자재 구매계약") is False
+
+
+def test_komipo_construction_by_name_only():
+    # 중부는 구분값에 의존하지 않고 계약명으로만 공사 판별.
+    a = KOMIPOAdapter()
+    assert a._odcloud_is_construction("무엇이든", "발전설비 경상정비공사") is True
+    assert a._odcloud_is_construction("", "시설관리 용역") is False
+    assert a._odcloud_is_construction("공사", "자재 구매") is False
 
 
 # ── 100억 사전 필터 ──────────────────────────────────────────────────────────
@@ -160,11 +170,23 @@ def test_odcloud_path_picks_latest_year():
     # KOSPO는 2021~2025 등록 → 최신(2025) uddi를 써야 누적 최다.
     a = KOSPOAdapter()
     assert a._odcloud_path() == ODCLOUD_DATASETS["kospo"][2025]
+    # 중부는 최신(2026) 스냅샷 하나 등록.
+    assert KOMIPOAdapter()._odcloud_path() == ODCLOUD_DATASETS["komipo"][2026]
 
 
-def test_komipo_has_no_odcloud_contracts_but_keeps_notices():
-    # 믹스인 미적용 genco(KOMIPO)는 odcloud 데이터셋도 없고 KEPCO의 빈
+def test_koen_has_no_odcloud_contracts_but_keeps_notices():
+    # 믹스인 미적용 genco(KOEN, 남동)는 odcloud 데이터셋도 없고 KEPCO의 빈
     # fetch_contracts를 그대로 유지 — 공고만 수집한다.
-    assert "komipo" not in ODCLOUD_DATASETS
-    a = KOMIPOAdapter()
+    assert "koen" not in ODCLOUD_DATASETS
+    a = KOENAdapter()
     assert list(a.fetch_contracts(date(2021, 1, 1), date(2021, 12, 31))) == []
+
+
+def test_komipo_odcloud_401_degrades_gracefully():
+    # 활용신청 미승인 데이터셋은 401 → _odcloud_get이 흡수해 계약 0건(공고는 정상).
+    import requests
+    a = KOMIPOAdapter()
+    err = requests.HTTPError("401 Unauthorized")
+    with patch("src.adapters.genco_odcloud.get_with_retry", side_effect=err):
+        rows = list(a.fetch_contracts(date(2020, 1, 1), date(2025, 12, 31)))
+    assert rows == []

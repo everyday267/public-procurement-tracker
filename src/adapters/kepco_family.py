@@ -50,10 +50,20 @@ class KOSPOAdapter(OdcloudContractsMixin, _GencoAdapter):
         return "공사" in name and "용역" not in name
 
 
-class KOMIPOAdapter(_GencoAdapter):
-    """한국중부발전 (COM05)."""
+class KOMIPOAdapter(OdcloudContractsMixin, _GencoAdapter):
+    """한국중부발전 (COM05). 공고=KEPCO 빅데이터, 계약=odcloud(믹스인, 15003748).
+
+    ※ 계약 수집은 해당 odcloud 데이터셋(15003748)에 대한 활용신청이 승인돼야
+      동작한다(미승인 시 401 → 계약 0건으로 우아하게 스킵, 공고는 정상).
+    """
     source = "komipo"
     agency_codes = ["KOMIPO"]
+
+    def _odcloud_is_construction(self, kind: str, name: str) -> bool:
+        # 중부 입찰정보는 구분/조달방법 필드 의미가 KOSPO와 미세하게 다를 수 있어
+        # 계약명 기준으로만 공사를 분리한다(공사 포함·용역 제외). 활용신청 승인 후
+        # 실데이터로 재검증 예정.
+        return "공사" in name and "용역" not in name
 
 
 class KOENAdapter(_GencoAdapter):
