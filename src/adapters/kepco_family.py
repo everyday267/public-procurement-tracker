@@ -11,10 +11,16 @@
 인증키는 한전과 동일한 KEPCO_API_KEY를 공유한다.
 각 서브클래스는 source/agency_codes/companyId만 다르고 나머지(fetch·normalize·
 필터·health_check)는 KEPCOAdapter를 그대로 상속한다.
+
+단, KEPCO 빅데이터 API는 '입찰공고'만 제공하고 계약 체결 현황은 주지 않는다.
+남부발전(KOSPO)·동서발전(EWP)은 공공데이터포털 odcloud API로 계약이 별도 공개돼
+있어 OdcloudContractsMixin으로 fetch_contracts를 보강한다(공고는 KEPCO 유지).
+믹스인을 KEPCOAdapter보다 **앞에** 상속해 fetch_contracts를 오버라이드한다.
 """
 from typing import Optional
 
 from .kepco import KEPCOAdapter, COMPANY_IDS
+from .genco_odcloud import OdcloudContractsMixin
 
 
 class _GencoAdapter(KEPCOAdapter):
@@ -31,10 +37,17 @@ class KOWEPOAdapter(_GencoAdapter):
     agency_codes = ["KOWEPO"]
 
 
-class KOSPOAdapter(_GencoAdapter):
-    """한국남부발전 (COM04)."""
+class KOSPOAdapter(OdcloudContractsMixin, _GencoAdapter):
+    """한국남부발전 (COM04). 공고=KEPCO 빅데이터, 계약=odcloud(믹스인)."""
     source = "kospo"
     agency_codes = ["KOSPO"]
+
+    def _odcloud_is_construction(self, kind: str, name: str) -> bool:
+        # KOSPO 구분은 '구매입찰정보/공사용역입찰정보'뿐 — 공사·용역이 한 코드에
+        # 섞여 있어 계약명으로 공사만 분리한다(용역 제외). 조사 근거: probe #191.
+        if "공사" not in kind:
+            return False
+        return "공사" in name and "용역" not in name
 
 
 class KOMIPOAdapter(_GencoAdapter):
@@ -49,8 +62,11 @@ class KOENAdapter(_GencoAdapter):
     agency_codes = ["KOEN"]
 
 
-class EWPAdapter(_GencoAdapter):
-    """한국동서발전 (COM08)."""
+class EWPAdapter(OdcloudContractsMixin, _GencoAdapter):
+    """한국동서발전 (COM08). 공고=KEPCO 빅데이터, 계약=odcloud(믹스인).
+
+    EWP 구분은 공사/용역/물품이 직접 구분돼 믹스인 기본 판정(구분=='공사')을 쓴다.
+    """
     source = "ewp"
     agency_codes = ["EWP"]
 

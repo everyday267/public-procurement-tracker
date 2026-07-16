@@ -42,15 +42,29 @@ job 87007922417)에서 실행한 결과. data.go.kr 본 포털은 해외 IP를 �
   음성천연가스발전소 연료공급시설 277억, 울산복합 2,3CC 경상정비 200억,
   당진화력 3,4호기 터빈·보일러 경상정비 223억 등. 음성 관련 공사만 15+건.
 
-## 결론 / 다음 단계
+## 구현 (2026-07-16) — 정식 어댑터화 완료
 
-1. **odcloud API 경로 유효** — 두 발전사 모두 러너에서 전량 순회 가능.
-2. **수집 전략**: 각 사 최신 연도 파일 1개 = 누적 전량. 연 1회(상반기 스냅샷
-   갱신 시) 최신 uddi로 재수집. uddi가 연도마다 바뀌므로 **연도→uddi 매핑을
-   config에 두고 신규 연도 추가**하는 구조 필요.
-3. **필드 정규화**: KOSPO(예정가격 없음, 금액 타입 혼재) / EWP(부가세 포함
-   금액·예정가격, 계약번호 有) → normalizer에서 소스별 매핑.
-4. **dedup**: EWP는 계약번호·계약업체 有 → G2B 계약과 교차 판정 가능.
-   KOSPO는 계약명+계약일자+금액 조합 키.
-5. **잔여 소스**: KOMIPO(중부발전)·KOEN(남동발전)·KOSEP(서부발전)는 파일
-   데이터(엑셀) 형태로 추정 — uddi/데이터셋 ID 추가 조사 필요.
+조사 결과를 `src/adapters/genco_odcloud.py`의 **`OdcloudContractsMixin`**으로
+정식 통합했다. genco 어댑터(kepco_family.py)에서 이 믹스인을 KEPCOAdapter보다
+앞에 상속(KOSPO·EWP)해 **공고는 KEPCO 빅데이터, 계약은 odcloud**로 이원화한다.
+
+- **`ODCLOUD_DATASETS`**: source→{연도:uddi} 매핑. `_odcloud_path()`가 최신 연도
+  (누적 최다)를 자동 선택. 신규 연도 스냅샷 공개 시 이 dict에 한 줄 추가.
+- **`fetch_contracts(since, until)`**: 최신 누적 스냅샷을 전량 순회 후 계약일자로
+  기간 필터. 429/5xx는 http_client 재시도. G2B_API_KEY 미설정 시 계약만 skip.
+- **`is_large_construction_contract`**: 공사 + 계약금액 100억↑ (EX 어댑터와 동일
+  규약). EWP는 구분=='공사', KOSPO는 계약명 휴리스틱(`_odcloud_is_construction`).
+- **`normalize_contract`**: 공통 contracts 스키마로 매핑(EWP는 계약번호·계약업체·
+  계약방법까지, KOSPO는 금액·사업소 위주). run_monthly `_is_target_contract`가
+  최종 100억↑ 공사 게이트를 건다.
+- 테스트 `tests/test_genco_odcloud.py`(공사판별·필터·정규화·페이징·기간필터·키부재)
+  + run_monthly 통합 구동으로 음성 송전선로 1,050억이 DB/CSV까지 도달 확인.
+
+### 잔여 과제
+
+- **KOMIPO(중부)·KOEN(남동)·KOWEPO(서부)** 계약: odcloud 데이터셋 uddi 미확보 →
+  `ODCLOUD_DATASETS`에 미등록 상태(계약 skip, 공고만 수집). 추가 조사 후 등록.
+- **dedup**: EWP 계약번호·계약업체로 G2B 계약과 교차 판정 가능(현재 발전사 자체
+  계약은 G2B에 없어 실질 중복 없음). 향후 G2B 통합 집계 시 계약명+일자+금액 보조키.
+- **스냅샷 갱신 감지**: 상반기 스냅샷이라 신규 연도 uddi를 수동 추가해야 함 —
+  데이터셋 목록 API로 최신 uddi 자동 발견하는 후속 개선 여지.
