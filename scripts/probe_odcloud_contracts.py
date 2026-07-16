@@ -37,6 +37,12 @@ DATASETS = {
             ("2025", "/15065323/v1/uddi:76402d29-9ed9-4ffe-9197-8dcc89147adc"),
         ],
     },
+    "komipo": {
+        "name": "한국중부발전 입찰정보(계약 체결 현황)",
+        "endpoints": [
+            ("2026", "/15003748/v1/uddi:34a82e9b-9b6a-471d-a9b5-c333ec8b9694"),
+        ],
+    },
 }
 
 KEY = os.environ.get("G2B_API_KEY", "")
