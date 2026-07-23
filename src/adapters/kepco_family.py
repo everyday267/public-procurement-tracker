@@ -21,6 +21,7 @@ from typing import Optional
 
 from .kepco import KEPCOAdapter, COMPANY_IDS
 from .genco_odcloud import OdcloudContractsMixin
+from .genco_file import FileContractsMixin
 
 
 class _GencoAdapter(KEPCOAdapter):
@@ -66,8 +67,12 @@ class KOMIPOAdapter(OdcloudContractsMixin, _GencoAdapter):
         return "공사" in name and "용역" not in name
 
 
-class KOENAdapter(_GencoAdapter):
-    """한국남동발전 (COM06)."""
+class KOENAdapter(FileContractsMixin, _GencoAdapter):
+    """한국남동발전 (COM06). 공고=KEPCO 빅데이터, 계약=번들 엑셀 파일(믹스인).
+
+    남동발전은 계약현황을 odcloud API가 아닌 '1천만원 이상 계약' 연도별 엑셀로만
+    공개한다. data/koen/*.xlsx 를 읽어 공사 100억↑을 선별한다(구분=='공사').
+    """
     source = "koen"
     agency_codes = ["KOEN"]
 

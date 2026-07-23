@@ -9,7 +9,7 @@ from datetime import date
 from unittest.mock import patch
 
 from src.adapters.kepco_family import (
-    KOSPOAdapter, EWPAdapter, KOMIPOAdapter, KOENAdapter,
+    KOSPOAdapter, EWPAdapter, KOMIPOAdapter, KOWEPOAdapter,
 )
 from src.adapters.genco_odcloud import ODCLOUD_DATASETS
 from src.run_monthly import _is_target_contract
@@ -174,11 +174,11 @@ def test_odcloud_path_picks_latest_year():
     assert KOMIPOAdapter()._odcloud_path() == ODCLOUD_DATASETS["komipo"][2026]
 
 
-def test_koen_has_no_odcloud_contracts_but_keeps_notices():
-    # 믹스인 미적용 genco(KOEN, 남동)는 odcloud 데이터셋도 없고 KEPCO의 빈
-    # fetch_contracts를 그대로 유지 — 공고만 수집한다.
-    assert "koen" not in ODCLOUD_DATASETS
-    a = KOENAdapter()
+def test_kowepo_has_no_contracts_but_keeps_notices():
+    # 서부발전(KOWEPO)은 계약 데이터 부재로 커버리지 포기 — 어떤 계약 믹스인도
+    # 없이 KEPCO의 빈 fetch_contracts를 유지(공고만 수집).
+    assert "kowepo" not in ODCLOUD_DATASETS
+    a = KOWEPOAdapter()
     assert list(a.fetch_contracts(date(2021, 1, 1), date(2021, 12, 31))) == []
 
 
