@@ -86,7 +86,8 @@ def test_g2b_family_fetches_once_and_kr_rail_is_subset():
         return iter([c_kr])
 
     with tempfile.TemporaryDirectory() as tmp:
-        with patch.dict(os.environ, {"G2B_API_KEY": "dummy"}), \
+        # 계약 수집은 opt-in → 이 테스트는 G2B_COLLECT_CONTRACTS=1로 켠다.
+        with patch.dict(os.environ, {"G2B_API_KEY": "dummy", "G2B_COLLECT_CONTRACTS": "1"}), \
              patch.object(G2BOpnStdAdapter, "fetch_notices", side_effect=notices), \
              patch.object(G2BOpnStdAdapter, "fetch_awards_scoped", side_effect=awards_scoped), \
              patch.object(G2BOpnStdAdapter, "fetch_contracts_scoped", side_effect=contracts_scoped), \
@@ -95,8 +96,8 @@ def test_g2b_family_fetches_once_and_kr_rail_is_subset():
             rm.run("2026-06", db_path=f"{tmp}/t.db", output_dir=f"{tmp}/o",
                    sources=["g2b_opnstd", "kr_rail"])
 
-        # 공고 전국 fetch 1회 + 계약·낙찰 스코프 조회 각 1회 (소스가 2개여도 공유).
-        assert calls == {"n": 1, "a": 1, "c": 1}
+        # 공고 전국 fetch 1회 + 계약 스코프 조회 1회(소스 2개여도 공유). 낙찰은 상시 생략(a=0).
+        assert calls == {"n": 1, "a": 0, "c": 1}
 
         conn = sqlite3.connect(f"{tmp}/t.db")
         g2b_nos = {r[0] for r in conn.execute(
@@ -106,6 +107,31 @@ def test_g2b_family_fetches_once_and_kr_rail_is_subset():
         conn.close()
         assert g2b_nos == {"G1", "K1"}   # 전국 전체
         assert kr_nos == {"K1"}          # 국가철도공단분만
+
+
+def test_g2b_contracts_skipped_by_default():
+    """G2B_COLLECT_CONTRACTS 미설정 시 계약 스윕은 호출되지 않는다(공고만 수집)."""
+    n_g = {"bidNtceNo": "G1", "bidNtceOrd": "0", "bidNtceNm": "일반공사",
+           "bsnsDivNm": "공사", "presmptPrce": "20000000000", "dmndInsttNm": "서울시"}
+    calls = {"n": 0, "c": 0}
+
+    def notices(s, u):
+        calls["n"] += 1
+        return iter([n_g])
+
+    def contracts_scoped(notice_nos, s, u):
+        calls["c"] += 1
+        return iter([])
+
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {k: v for k, v in os.environ.items() if k != "G2B_COLLECT_CONTRACTS"}
+        env["G2B_API_KEY"] = "dummy"
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(G2BOpnStdAdapter, "fetch_notices", side_effect=notices), \
+             patch.object(G2BOpnStdAdapter, "fetch_contracts_scoped", side_effect=contracts_scoped):
+            rm.run("2026-06", db_path=f"{tmp}/t.db", output_dir=f"{tmp}/o",
+                   sources=["g2b_opnstd"])
+        assert calls == {"n": 1, "c": 0}   # 공고만, 계약 스윕 미호출
 
 
 # ------------------------------------------------------------------ #

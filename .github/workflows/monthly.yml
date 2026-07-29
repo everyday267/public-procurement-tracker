@@ -19,6 +19,10 @@ on:
       sources:
         description: '수집 소스 (쉼표구분, 예: g2b_opnstd 또는 lh,kr_rail). 비우면 전체'
         required: false
+      collect_contracts:
+        description: 'G2B 계약(체결) 수집 여부. true면 주간 전량 스윕(느림, 429 민감). 기본은 공고만.'
+        required: false
+        default: 'false'
       probe_script:
         description: '설정 시 수집 대신 조사 스크립트 실행 (scripts/ 하위 파일명, 예: probe_phase2.py)'
         required: false
@@ -112,6 +116,8 @@ jobs:
           LH_API_KEY: ${{ secrets.LH_API_KEY }}
           KEPCO_API_KEY: ${{ secrets.KEPCO_API_KEY }}
           EX_API_KEY: ${{ secrets.EX_API_KEY }}
+          # 계약(체결) 수집은 collect_contracts=true일 때만. 기본은 공고만(빠름).
+          G2B_COLLECT_CONTRACTS: ${{ github.event.inputs.collect_contracts == 'true' && '1' || '0' }}
 
       - name: 수집 결과 요약 (표본 대조용)
         if: steps.guard.outputs.should_run == 'true'

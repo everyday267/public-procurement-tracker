@@ -5,6 +5,7 @@
     python -m src.run_monthly --month 2026-05 --db procurement.db
     python -m src.run_monthly --month 2026-05 --sources lh,kr_rail
 """
+import os
 import uuid
 import logging
 import argparse
@@ -348,14 +349,19 @@ def run(month: Optional[str] = None, db_path: str = "procurement.db", output_dir
                           and g2b.passes_filter(n) and n.get("notice_no")}
             logger.info("[G2B 공용] 전국 공고=%d, 대상(공사100억↑)=%d → 계약·낙찰은 대상 공고번호로만 조회",
                         len(raw_n), len(target_nos))
-            # 낙찰·계약은 공고와 분리해 처리한다. 여기서 실패(예: 429)해도 이미
-            # 확보한 공고(raw_n)는 버리지 않고, 낙찰·계약만 빈 결과로 진행한다.
+            # 계약(체결) 수집: 개방표준 계약 API가 공고번호 서버측 필터를 지원하지
+            # 않아(probe #206) 주간 전량 스윕이 필요하다(공사 100억↑만 남김).
+            # 페이징 부하가 커 기본은 생략하고, G2B_COLLECT_CONTRACTS=1일 때만
+            # 수집한다. 공고 수집은 항상 수행(핵심 산출물). 낙찰은 개방표준 API가
+            # 공고번호 타겟 불가·산출물 불필요라 상시 생략.
             raw_a, raw_c = [], []
-            try:
-                raw_a = list(g2b.fetch_awards_scoped(target_nos, start, end))
-                raw_c = list(g2b.fetch_contracts_scoped(target_nos, start, end))
-            except Exception:
-                logger.exception("[G2B 공용] 낙찰·계약 조회 실패 — 공고는 유지, 낙찰·계약만 스킵")
+            if os.getenv("G2B_COLLECT_CONTRACTS") == "1":
+                try:
+                    raw_c = list(g2b.fetch_contracts_scoped(target_nos, start, end))
+                except Exception:
+                    logger.exception("[G2B 공용] 계약 주간 스윕 실패 — 공고는 유지, 계약만 스킵")
+            else:
+                logger.info("[G2B 공용] 계약 수집 생략(G2B_COLLECT_CONTRACTS≠1) — 공고만 수집")
             logger.info("[G2B 공용] 수집 완료: 공고=%d 낙찰=%d 계약=%d",
                         len(raw_n), len(raw_a), len(raw_c))
             _log_schema("G2B 공고", raw_n)
