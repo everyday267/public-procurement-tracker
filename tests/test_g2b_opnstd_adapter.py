@@ -230,53 +230,47 @@ def test_notice_partial_month_range(adapter):
 
 
 # ------------------------------------------------------------------ #
-# bidNtceNo 스코프 조회 (probe 검증 + 폴백)                            #
+# 계약 수집: 주간 스윕 + 어댑터단 공사 100억↑ 필터                      #
+#   (probe #206: 개방표준 계약 API는 bidNtceNo 서버측 필터 미지원 →     #
+#    공고번호 스코프 폐기, 주간 스윕 후 클라이언트 필터)                 #
 # ------------------------------------------------------------------ #
 
-def test_scoped_contracts_uses_bidntceno_when_filter_supported(adapter):
-    """probe totalCount가 작으면 공고번호별 스코프 조회를 쓴다."""
-    with patch.object(adapter, "_total_count", return_value=1) as probe, \
-         patch.object(adapter, "_request", return_value=iter([])) as req:
+def test_contracts_sweep_weekly_windows_no_bidntceno(adapter):
+    """계약은 주간창으로만 순회하고 bidNtceNo는 쓰지 않는다."""
+    with patch.object(adapter, "_request", return_value=iter([])) as req:
         list(adapter.fetch_contracts_scoped(
             {"N1", "N2"}, date(2026, 6, 1), date(2026, 6, 30)))
-    probe.assert_called_once()
-    # 공고 2개 × 주 5개(6/1~6/30) = 10회, 모두 bidNtceNo 포함
-    assert req.call_count == 10
-    for call in req.call_args_list:
-        assert "bidNtceNo" in call.args[1]
-
-
-def test_scoped_contracts_falls_back_to_sweep_when_filter_ignored(adapter):
-    """probe totalCount가 크면(필터 무시) 전국 스윕으로 폴백한다."""
-    with patch.object(adapter, "_total_count", return_value=99999), \
-         patch.object(adapter, "_request", return_value=iter([])) as req:
-        list(adapter.fetch_contracts_scoped(
-            {"N1"}, date(2026, 6, 1), date(2026, 6, 30)))
-    # 폴백: 주 5개 스윕, bidNtceNo 없음
+    # 6월: 주간창 5개 (1-7, 8-14, 15-21, 22-28, 29-30)
     assert req.call_count == 5
     for call in req.call_args_list:
-        assert "bidNtceNo" not in call.args[1]
+        params = call.args[1]
+        assert "bidNtceNo" not in params
+        assert "cntrctCnclsBgnDate" in params and "cntrctCnclsEndDate" in params
+    assert req.call_args_list[0].args[1]["cntrctCnclsBgnDate"] == "20260601"
+    assert req.call_args_list[0].args[1]["cntrctCnclsEndDate"] == "20260607"
 
 
-def test_scoped_empty_notice_set_fetches_nothing(adapter):
-    """대상 공고가 없으면 아무 요청도 하지 않는다."""
-    with patch.object(adapter, "_total_count") as probe, \
-         patch.object(adapter, "_request") as req:
-        result = list(adapter.fetch_contracts_scoped(
-            set(), date(2026, 6, 1), date(2026, 6, 30)))
-    assert result == []
-    probe.assert_not_called()
+def test_contracts_sweep_yields_only_large_construction(adapter):
+    """공사 + 계약금액/총액 100억↑만 통과시킨다(물품·소액 제외)."""
+    big = {"bsnsDivNm": "공사", "cntrctAmt": "15000000000", "cntrctNm": "A공사"}
+    installment = {"bsnsDivNm": "공사", "cntrctAmt": "3000000000",
+                   "ttalCntrctAmt": "40000000000", "cntrctNm": "B 장기계속"}  # 차수 소액·총액 100억↑
+    small = {"bsnsDivNm": "공사", "cntrctAmt": "5000000000", "cntrctNm": "C 소액"}
+    goods = {"bsnsDivNm": "물품", "cntrctAmt": "20000000000", "cntrctNm": "D 물품"}
+    rows = [big, installment, small, goods]
+    with patch.object(adapter, "_request", side_effect=lambda *a, **k: iter(rows)):
+        got = list(adapter.fetch_contracts_scoped(
+            set(), date(2026, 6, 1), date(2026, 6, 7)))  # 1주 → _request 1회
+    assert got == [big, installment]
+
+
+def test_awards_scoped_returns_empty_without_requests(adapter):
+    """낙찰 스코프 수집은 생략(빈 결과) — 요청도 하지 않는다."""
+    with patch.object(adapter, "_request") as req:
+        got = list(adapter.fetch_awards_scoped(
+            {"N1"}, date(2026, 6, 1), date(2026, 6, 30)))
+    assert got == []
     req.assert_not_called()
-
-
-def test_scoped_probe_none_falls_back(adapter):
-    """probe가 None(오류)이면 안전하게 전국 스윕으로 폴백한다."""
-    with patch.object(adapter, "_total_count", return_value=None), \
-         patch.object(adapter, "_request", return_value=iter([])) as req:
-        list(adapter.fetch_awards_scoped(
-            {"N1"}, date(2026, 6, 1), date(2026, 6, 7)))
-    assert req.call_count == 1  # 1주 스윕
-    assert "bidNtceNo" not in req.call_args_list[0].args[1]
 
 
 # ------------------------------------------------------------------ #
