@@ -59,6 +59,7 @@ SELF_SCOPED = ["lh", "kepco", "kwater", "ex", "kogas"] + list(GENCO_ADAPTERS)
 NOTICE_COLS = [
     "notice_no", "title", "construction_type", "bid_method",
     "is_long_term_continuing", "estimated_price", "posted_at", "status",
+    "demand_inst", "notice_inst",                       # 수요기관 / 공고기관(발주처)
     "zone_hq", "license_conditions", "vendor_restrictions",
 ]
 AWARD_COLS = ["notice_no", "bidder_name", "bidder_biz_no", "award_price", "award_rate", "expect_price"]

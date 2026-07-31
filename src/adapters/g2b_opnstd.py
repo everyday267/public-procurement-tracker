@@ -324,6 +324,8 @@ class G2BOpnStdAdapter(BaseProcurementAdapter):
             "posted_at":               raw.get("bidNtceDate"),
             "bid_open_at":             raw.get("opengDate") or raw.get("bidClseDate"),
             "status":                  raw.get("bidNtceSttusNm") or raw.get("cntrctCnclsSttusNm") or "공고중",
+            "demand_inst":             raw.get("dmndInsttNm"),   # 수요기관명
+            "notice_inst":             raw.get("ntceInsttNm"),   # 공고기관명(발주처)
             "raw_payload":             raw,
             "source_hash":             payload_hash,
             "collected_at":            None,
