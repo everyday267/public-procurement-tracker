@@ -70,9 +70,29 @@ python -m src.run_monthly --since 2026-06-01 --until 2026-06-07 --sources g2b_op
 | `LH_API_KEY` | LH e-Bid 자체 OpenAPI |
 | `KEPCO_API_KEY` | 한전 전자입찰계약정보 OpenAPI (공공데이터포털 발급) |
 | `EX_API_KEY` | 한국도로공사 전자조달 계약공개현황 OpenAPI (data.ex.co.kr 발급) |
+| `HUG_API_KEY` | HUG 분양보증현황 OPEN API (부가 도구 — 아래 참고, 조사/수동 실행용) |
 
 시크릿이 Settings → Secrets and variables → Actions에 등록되어 있어야
 `monthly-collect` / `quarterly-backfill` 워크플로우가 정상 동작합니다.
+
+## 부가 도구 — HUG 분양보증현황 조회
+
+발주 공사 추적과는 별개로, HUG(주택도시보증공사) OPEN API
+"지역별 분양보증현황"을 조회하는 독립 도구다 (`run_monthly` 파이프라인과 무관).
+
+```bash
+export HUG_API_KEY=<HUG OPEN API 서비스키>
+python -m src.hug_guarantee --areas 02 --categories officetel,retail
+python -m src.hug_guarantee --areas all --categories all --detail --out output/hug.csv
+```
+
+> ⚠️ 이 API의 목록 응답에는 **주택유형(아파트/오피스텔/상가) 필드가 없다**
+> (사업장번호·사업장명·시행/시공사·주소 5개뿐). 그래서 오피스텔·상가 분류는
+> 상세(`BUNO`) 응답에 유형 필드가 있으면 그 값으로 확정하고, 없으면 사업장명
+> 키워드로 **추정**한다 (`category_basis` 컬럼: `field:<필드명>`=확정, `name`=추정).
+> 상세 응답 필드·`AREA_DCD` 코드표는 사양서에 없어 미확정이며,
+> `scripts/probe_hug_api.py`로 확정한다. 배경·미확정 항목은
+> `docs/HUG_API_RESEARCH.md` 참고.
 
 ## 디렉토리
 ```
@@ -82,9 +102,11 @@ src/
   normalizer.py
   long_term_detector.py
   schema_monitor.py  어댑터 장애·스키마 변경 감지 (schema-monitor 워크플로우)
+  hug_guarantee.py   [부가] HUG 분양보증현황 조회 도구 (파이프라인 미연결)
   run_monthly.py
 config/agencies.yaml
 tests/
 .github/workflows/
 docs/PRD_public_procurement_tracker_v1.4.md
+docs/HUG_API_RESEARCH.md
 ```

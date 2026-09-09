@@ -45,6 +45,7 @@ jobs:
         env:
           EX_API_KEY: ${{ secrets.EX_API_KEY }}
           DATA_EX_API_KEY: ${{ secrets.DATA_EX_API_KEY }}
+          HUG_API_KEY: ${{ secrets.HUG_API_KEY }}
       - name: 샘플 업로드
         if: always()
         uses: actions/upload-artifact@v4

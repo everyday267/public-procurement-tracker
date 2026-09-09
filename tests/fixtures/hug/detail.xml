@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<response>
+  <header>
+    <resultCode>00</resultCode>
+    <resultMsg>NORMAL SERVICE.</resultMsg>
+  </header>
+  <body>
+    <items>
+      <item>
+        <BUNO>019001</BUNO>
+        <BSU_NM>해운대 그랜드 SK VIEW</BSU_NM>
+        <CUST_NM1>(주)에스케이건설</CUST_NM1>
+        <CUST_NM2>(주)에스케이건설</CUST_NM2>
+        <ADDR>부산 해운대구 우동 1408번지</ADDR>
+        <HOUS_DCD_NM>오피스텔</HOUS_DCD_NM>
+        <TOT_HSHLD_CNT>240</TOT_HSHLD_CNT>
+      </item>
+    </items>
+  </body>
+</response>

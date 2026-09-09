@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<response>
+  <header>
+    <resultCode>00</resultCode>
+    <resultMsg>NORMAL SERVICE.</resultMsg>
+  </header>
+  <body>
+    <items>
+      <item>
+        <BUNO>017732</BUNO>
+        <BSU_NM>가화만사성 정관타운</BSU_NM>
+        <CUST_NM1>가화건설</CUST_NM1>
+        <CUST_NM2>(주)가화건설</CUST_NM2>
+        <ADDR>부산 기장군 정관면 방곡리 380번지</ADDR>
+      </item>
+      <item>
+        <BUNO>017944</BUNO>
+        <BSU_NM>경성 스마트 W 도시형생활주택</BSU_NM>
+        <CUST_NM1>(주)경성리츠</CUST_NM1>
+        <CUST_NM2>(주)경성리츠</CUST_NM2>
+        <ADDR>부산 사하구 괴정동 260-1번지외 6필지</ADDR>
+      </item>
+      <item>
+        <BUNO>018451</BUNO>
+        <BSU_NM>개금역 금강펜테리움 더 스퀘어 오피스텔</BSU_NM>
+        <CUST_NM1>(주)하이아트이앤씨</CUST_NM1>
+        <CUST_NM2>(주)금강주택</CUST_NM2>
+        <ADDR>부산 부산진구 개금동 177-20번지 외 49필지</ADDR>
+      </item>
+      <item>
+        <BUNO>017029</BUNO>
+        <BSU_NM>부산 명지지구 B5블럭 센트럴파크 상가</BSU_NM>
+        <CUST_NM1>금강비스타(주)</CUST_NM1>
+        <CUST_NM2>(주)금강주택</CUST_NM2>
+        <ADDR>부산 강서구 명지동 1692-1번지 일원(C-4블럭)</ADDR>
+      </item>
+      <item>
+        <BUNO>019001</BUNO>
+        <BSU_NM>해운대 그랜드 SK VIEW</BSU_NM>
+        <CUST_NM1>(주)에스케이건설</CUST_NM1>
+        <CUST_NM2>(주)에스케이건설</CUST_NM2>
+        <ADDR>부산 해운대구 우동 1408번지</ADDR>
+      </item>
+    </items>
+  </body>
+</response>
